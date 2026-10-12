@@ -71,7 +71,8 @@ constants (`glsl.ts`), so the picture and the tests cannot drift apart.
 
 ## Rendering
 
-Everything is procedural; there are no image assets, so the app stays small and loads fast.
+Almost everything is procedural. The only image assets are two small files for the sea in `public/textures/`; the
+scene falls back to procedural detail if they fail to load.
 
 - **Lighting:** linear HDR with ACES filmic tone mapping. A warm sun and sky light the scene, and bloom picks up only
   the brightest light (lava, the sun and its glint). A light vignette and film grain finish each frame.
@@ -122,3 +123,9 @@ src/
   is the least intrusive one.
 - The scene is procedural, not photographic. Swapping in authored textures (rock, vegetation, normal maps) is the next
   step toward the fully cinematic look of the reference art.
+
+## Credits
+
+- `public/textures/sky_blouberg_sunrise_2_1k.hdr`: "Blouberg Sunrise 2" by Greg Zaal, [Poly Haven](https://polyhaven.com/a/blouberg_sunrise_2), CC0.
+  Used for the clouds seen in ocean reflections, rotated to match the scene's sun.
+- `public/textures/waternormals.jpg`: wave normal map from the [three.js examples](https://github.com/mrdoob/three.js/tree/dev/examples/textures).
