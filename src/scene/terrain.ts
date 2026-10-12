@@ -181,7 +181,9 @@ export function heightAt(x: number, z: number) {
 
 // ---------- Mesh ----------
 export const TERRAIN_NX = 800;
-export const TERRAIN_NZ = 320;
+export const TERRAIN_NZ = 360;
+/** Row spacing grows with distance (z = Z_FAR * (j/NZ)^Z_POW): fine near the cut, coarse at the horizon. */
+export const Z_POW = 2.6;
 
 export type TerrainData = {
   mesh: THREE.Mesh;
@@ -192,7 +194,7 @@ export type TerrainData = {
   heightTexBounds: THREE.Vector4;
 };
 
-export const zAt = (j: number) => Z_FAR * Math.pow(j / TERRAIN_NZ, 2.1);
+export const zAt = (j: number) => Z_FAR * Math.pow(j / TERRAIN_NZ, Z_POW);
 export const xAt = (i: number) => X_MIN + ((X_MAX - X_MIN) * i) / TERRAIN_NX;
 
 /**
@@ -200,7 +202,7 @@ export const xAt = (i: number) => X_MIN + ((X_MAX - X_MIN) * i) / TERRAIN_NX;
  * Computed on a half-resolution grid and interpolated per vertex: about 4.5M height lookups.
  */
 function bakeLight(H: Float32Array, nx: number, nz: number, sun: { x: number; y: number; z: number }) {
-  const jOf = (z: number) => nz * Math.pow(Math.min(1, Math.max(0, z / Z_FAR)), 1 / 2.1);
+  const jOf = (z: number) => nz * Math.pow(Math.min(1, Math.max(0, z / Z_FAR)), 1 / Z_POW);
   const sample = (x: number, z: number) => {
     if (z > 0 || x < X_MIN || x > X_MAX) return -1e9;
     const fi = ((x - X_MIN) / (X_MAX - X_MIN)) * nx;
@@ -331,8 +333,8 @@ export function computeTerrain(sun: { x: number; y: number; z: number }): Terrai
   }
   // Height map for the ocean shader (water depth -> color, foam).
   const tw = 384;
-  const th = 192;
-  const bounds: [number, number, number, number] = [-900, 700, -1400, 0]; // xmin, xmax, zmin, zmax
+  const th = 1024; // ~9 km rows, so shoreline foam stays crisp near the cut
+  const bounds: [number, number, number, number] = [-900, 700, -9000, 0]; // xmin, xmax, zmin, zmax
   const heights = new Uint16Array(tw * th);
   for (let j = 0; j < th; j++) {
     const z = bounds[2] + ((bounds[3] - bounds[2]) * j) / (th - 1);

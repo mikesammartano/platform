@@ -43,7 +43,7 @@ export const SECTION_BOTTOM = -330;
 /** Horizontal extent of the modelled block. */
 export const X_MIN = -900;
 export const X_MAX = 2600;
-export const Z_FAR = -3000;
+export const Z_FAR = -9000;
 
 const n0 = { x: -Math.sin(SLAB.theta0), y: -Math.cos(SLAB.theta0) };
 /** Bending circle center. Points on the slab top arc are C + R (sin t, cos t). */

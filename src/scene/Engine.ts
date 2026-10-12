@@ -8,7 +8,7 @@ import { DEFAULT_LABELS, LABELS } from './labels';
 import { SECTION_BOTTOM, X_MAX, X_MIN, Z_FAR, cycleAt } from './model';
 import { buildPost } from './post';
 import { buildSection } from './section';
-import { TERRAIN_NX, TERRAIN_NZ, type TerrainArrays, buildTerrain, heightAt } from './terrain';
+import { TERRAIN_NX, TERRAIN_NZ, Z_POW, type TerrainArrays, buildTerrain, heightAt } from './terrain';
 
 
 /** One full cycle of the playback timeline, in seconds at 1x. */
@@ -227,7 +227,7 @@ export class Engine {
     const pos = this.terrain.mesh.geometry.getAttribute('position').array as Float32Array;
     const nx = TERRAIN_NX;
     const fi = ((x - X_MIN) / (X_MAX - X_MIN)) * nx;
-    const fj = TERRAIN_NZ * Math.pow(Math.min(1, Math.max(0, z / Z_FAR)), 1 / 2.1);
+    const fj = TERRAIN_NZ * Math.pow(Math.min(1, Math.max(0, z / Z_FAR)), 1 / Z_POW);
     const i = Math.min(nx - 1, Math.floor(fi));
     const j = Math.min(TERRAIN_NZ - 1, Math.floor(fj));
     const u = fi - i;
