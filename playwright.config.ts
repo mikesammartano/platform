@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 /** End-to-end checks of every teacher tool against the dev server (WebGL via SwiftShader in CI). */
 export default defineConfig({
   testDir: 'e2e',
-  timeout: 90_000,
+  timeout: 240_000, // generous: CI renders WebGL in software
   expect: { timeout: 15_000 },
   workers: 2,
   use: {

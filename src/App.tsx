@@ -89,16 +89,26 @@ export function App() {
 
   useEffect(() => {
     let e: Engine | null = null;
-    try {
-      e = new Engine(canvasRef.current!);
-      setEngine(e);
-      // test hook for the end-to-end suite and debugging (development builds only)
-      if (import.meta.env.DEV) Object.assign(window, { __engine: e, __app: useApp });
-    } catch (err) {
-      console.error(err);
-      setFailed(true);
-    }
-    return () => e?.dispose();
+    let cancelled = false;
+    Engine.create(canvasRef.current!)
+      .then((created) => {
+        if (cancelled) {
+          created.dispose();
+          return;
+        }
+        e = created;
+        setEngine(created);
+        // test hook for the end-to-end suite and debugging (development builds only)
+        if (import.meta.env.DEV) Object.assign(window, { __engine: created, __app: useApp });
+      })
+      .catch((err) => {
+        console.error(err);
+        setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      e?.dispose();
+    };
   }, []);
 
   useEffect(() => {

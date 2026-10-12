@@ -4,6 +4,8 @@ import {
   slabTangent, slabTopY,
 } from './model';
 import { heightAt } from './terrain';
+import { KEY_DIR } from './environment';
+import { NOISE } from './glsl';
 
 /** Shared depth palette (also used by the on-screen legend). Shallow -> deep. */
 export const DEPTH_STOPS = ['#F2C94C', '#E8833A', '#D4473A', '#9E2F68'];
@@ -57,7 +59,7 @@ export function buildQuakes() {
       varying vec3 vCol; varying float vT; varying float vCore;
       vec3 ramp(float t){ t = clamp(t, 0., 1.) * 3.; if (t < 1.) return mix(uStops[0], uStops[1], t); if (t < 2.) return mix(uStops[1], uStops[2], t - 1.); return mix(uStops[2], uStops[3], t - 2.); }
       void main(){
-        vCol = mix(vec3(.98, .47, .32), ramp(aDepth), uDepthColor);
+        vCol = mix(vec3(.96, .22, .1), ramp(aDepth), uDepthColor);
         vT = fract(uTime / aPeriod + aPhase);
         if (aKind < .5) {
           // interface events: quiet while the fault is locked, a burst of aftershocks after the great earthquake
@@ -87,7 +89,8 @@ export function buildQuakes() {
         vec3 c = mix(vCol, vec3(1.), flash * .6 * dot);
         float a = max(max(dot * (.82 + .18 * flash), ring), glow);
         if (a < .01) discard;
-        gl_FragColor = vec4(c * (dot > .5 ? 1. : 1.15), a * uOpacity);
+        // HDR: a flash is bright enough to bloom
+        gl_FragColor = vec4(c * (1. + flash * 3.5), a * uOpacity);
       }`,
   });
   const points = new THREE.Points(geo, mat);
@@ -119,7 +122,7 @@ function softPoints(count: number, color: THREE.Color, renderOrder: number) {
       void main(){
         float r = length(gl_PointCoord - .5) * 2.;
         float a = 1. - smoothstep(.35, 1., r);
-        vec3 c = mix(uColor, vec3(1., .85, .55), uHot * (1. - smoothstep(0., .5, r)));
+        vec3 c = mix(uColor, vec3(1., .7, .35) * 3., uHot * (1. - smoothstep(0., .5, r)));
         gl_FragColor = vec4(c, a * vA * uOpacity);
       }`,
   });
@@ -265,42 +268,114 @@ function smokeTexture() {
   return t;
 }
 
+/**
+ * Eruption column: billboarded puffs with a volumetric look. Each puff is shaded by a fake sphere normal
+ * against the key light (bright sunlit side, dark ash core), and the base is lit orange by the vent.
+ */
 export function buildPlume() {
   const group = new THREE.Group();
   const tex = smokeTexture();
   const summitY = heightAt(VOLCANO.x, VOLCANO.z);
-  const N = 34;
+  const N = 56;
   const r = prng(41);
-  const puffs = Array.from({ length: N }, (_, i) => {
-    const mat = new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(0.32, 0.31, 0.3), transparent: true, depthWrite: false, opacity: 0 });
-    const s = new THREE.Sprite(mat);
-    s.renderOrder = 6;
-    group.add(s);
-    return { s, mat, off: i / N + r() * 0.02, rot: r() * 6.28, spin: (r() - 0.5) * 0.3, shade: 0.75 + r() * 0.35 };
+  const seeds = Array.from({ length: N }, (_, i) => ({ off: i / N + r() * 0.015, rot: r() * 6.28, spin: (r() - 0.5) * 0.6, seed: r() * 50, jx: r() - 0.5, jz: r() - 0.5 }));
+
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.index = quad.index;
+  geo.setAttribute('position', quad.getAttribute('position'));
+  geo.setAttribute('uv', quad.getAttribute('uv'));
+  const iPos = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+  const iData = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4); // size, alpha, rotation, seed
+  const iHeat = new THREE.InstancedBufferAttribute(new Float32Array(N), 1);
+  iPos.setUsage(THREE.DynamicDrawUsage);
+  iData.setUsage(THREE.DynamicDrawUsage);
+  iHeat.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('iPos', iPos);
+  geo.setAttribute('iData', iData);
+  geo.setAttribute('iHeat', iHeat);
+  geo.instanceCount = N;
+  const uniforms = { uKey: { value: KEY_DIR.clone() }, uOpacity: { value: 1 } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    vertexShader: /* glsl */ `
+      attribute vec3 iPos; attribute vec4 iData; attribute float iHeat;
+      varying vec2 vUv; varying float vAlpha; varying float vSeed; varying float vHeat; varying vec3 vKeyV;
+      uniform vec3 uKey;
+      void main(){
+        float c = cos(iData.z), s = sin(iData.z);
+        vec2 p = mat2(c, -s, s, c) * position.xy * iData.x;
+        vec4 mv = modelViewMatrix * vec4(iPos, 1.);
+        mv.xy += p;
+        vUv = uv; vAlpha = iData.y; vSeed = iData.w; vHeat = iHeat;
+        vKeyV = normalize((viewMatrix * vec4(uKey, 0.)).xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      precision highp float;
+      ${NOISE}
+      uniform float uOpacity;
+      varying vec2 vUv; varying float vAlpha; varying float vSeed; varying float vHeat; varying vec3 vKeyV;
+      void main(){
+        vec2 q = vUv * 2. - 1.;
+        float r2 = dot(q, q);
+        if (r2 > 1.) discard;
+        float n = fbm5(q * 1.6 + vSeed);
+        float dens = smoothstep(0., .55, (1. - r2) * (.45 + n));
+        if (dens < .01) discard;
+        // billow normal: sphere + noise relief, lit by the key light and sky
+        vec3 nrm = normalize(vec3(q + (vec2(fbm3(q * 2.3 + vSeed + 4.), fbm3(q * 2.3 + vSeed + 9.)) - .5) * .9, sqrt(max(1. - r2, 0.)) + .2));
+        float lit = max(dot(nrm, vKeyV), 0.);
+        vec3 ash = vec3(.06, .055, .05);
+        vec3 col = ash * (.25 + .35 * nrm.y) + vec3(1., .86, .7) * 1.5 * lit * .35 + vec3(.25, .32, .45) * .12;
+        // glow from the vent on the lowest, hottest puffs
+        col += vec3(2.4, .7, .15) * vHeat * (1. - smoothstep(-.6, .6, q.y)) * .8;
+        gl_FragColor = vec4(col, dens * vAlpha * uOpacity);
+      }`,
   });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 6;
+  group.add(mesh);
+
   // crater glow
-  const glowMat = new THREE.SpriteMaterial({ color: new THREE.Color(1, 0.45, 0.15), transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending, map: tex });
+  const glowMat = new THREE.SpriteMaterial({ color: new THREE.Color(4, 1.4, 0.35), transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending, map: tex });
   const glow = new THREE.Sprite(glowMat);
   glow.position.set(VOLCANO.x, summitY + 1.2, VOLCANO.z);
   glow.scale.set(14, 9, 1);
   group.add(glow);
+
   const wind = new THREE.Vector3(1, 0, -0.35).normalize();
-  const update = (t: number, opacity: number) => {
-    puffs.forEach((p) => {
-      const life = (t / 26 + p.off) % 1;
-      const rise = 8 + life * 190;
-      const drift = life * life * 170;
-      p.s.position.set(VOLCANO.x + wind.x * drift, summitY + rise, VOLCANO.z + wind.z * drift);
-      const sc = 12 + life * 95;
-      p.s.scale.set(sc, sc, 1);
-      p.mat.rotation = p.rot + t * p.spin * 0.2;
-      const fade = Math.min(1, life * 8) * (1 - life) ** 1.4;
+  const order = seeds.map((_, i) => i);
+  const tmp = new THREE.Vector3();
+  const update = (t: number, opacity: number, cam: THREE.Vector3) => {
+    const P: [number, number, number][] = [];
+    const D: [number, number, number, number][] = [];
+    const Hh: number[] = [];
+    seeds.forEach((sd) => {
+      const life = (t / 26 + sd.off) % 1;
+      const rise = 6 + life * 200;
+      const drift = life * life * 180;
+      const spread = 4 + life * 30;
+      P.push([VOLCANO.x + wind.x * drift + sd.jx * spread, summitY + rise, VOLCANO.z + wind.z * drift + sd.jz * spread]);
+      const size = 10 + life * 110;
+      const fade = Math.min(1, life * 10) * (1 - life) ** 1.3;
       // each puff carries the eruption strength from the moment it left the crater
       const born = cycleAt(t - life * 26).erupt;
-      p.mat.opacity = fade * (0.35 + 0.65 * born) * opacity;
-      const g = (0.24 + life * 0.3) * p.shade;
-      p.mat.color.setRGB(g, g * 0.97, g * 0.95);
+      D.push([size, fade * (0.4 + 0.6 * born), sd.rot + t * sd.spin * 0.15, sd.seed]);
+      Hh.push(Math.max(0, 1 - life * 7) * born);
     });
+    // draw far puffs first so blending reads correctly
+    order.sort((a, b) => tmp.set(...P[b]).distanceToSquared(cam) - tmp.set(...P[a]).distanceToSquared(cam));
+    order.forEach((src, k) => {
+      iPos.setXYZ(k, ...P[src]);
+      iData.setXYZW(k, ...D[src]);
+      iHeat.setX(k, Hh[src]);
+    });
+    iPos.needsUpdate = iData.needsUpdate = iHeat.needsUpdate = true;
+    uniforms.uOpacity.value = opacity;
     const e = cycleAt(t).erupt;
     glowMat.opacity = (0.3 + 0.6 * e + 0.1 * Math.sin(t * 2.3)) * opacity;
     glow.scale.set(12 + 8 * e, 8 + 5 * e, 1);

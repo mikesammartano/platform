@@ -69,6 +69,22 @@ constants (`glsl.ts`), so the picture and the tests cannot drift apart.
   across a classroom. The on-screen note says so: *Simplified model. Motion is accelerated. Scale and geometry are not
   exact.*
 
+## Rendering
+
+Everything is procedural; there are no image assets, so the app stays small and loads fast.
+
+- **Lighting:** linear HDR with ACES filmic tone mapping. A warm sun and sky light the scene, and bloom picks up only
+  the brightest light (lava, the sun and its glint). A light vignette and film grain finish each frame.
+- **Terrain:** the mountains use erosion-style noise, so they have sharp ridges, gullies and smooth valley floors.
+  Sun shadows and ambient occlusion are baked from the height field at load. Per-pixel detail normals add texture.
+  Materials blend by height, slope and aspect: beach, forest and grassland, dry slopes, layered rock, scree, ash
+  around the volcanoes, and snow.
+- **Sky and sea:** one atmosphere model drives the sky and the haze over distant land and sea, so far mountains
+  fade into the sky behind them. Clouds are lit with self-shadowing. The ocean has swell trains, Fresnel reflection,
+  a sun glint path, light through the wave crests, and surf and whitecaps.
+- **Eruption:** the column is lit, billowing ash, glowing at the vent and pulsing with each magma batch.
+- **Cross-section:** the cut rock has lit relief. Melt, the magma conduit, the rupture and earthquake flashes glow.
+
 ## Architecture
 
 ```

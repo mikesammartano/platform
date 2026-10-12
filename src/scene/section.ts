@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NOISE, SLAB_GLSL } from './glsl';
+import { NOISE, NOISE_D, SLAB_GLSL } from './glsl';
 import { HYPOCENTER, LOCKED, PRISM, SECTION_BOTTOM, TSUNAMI_X, X_MAX, X_MIN, slabCoords } from './model';
 import { TERRAIN_NX } from './terrain';
 
@@ -74,6 +74,7 @@ export function buildSection(profile: Float32Array) {
     fragmentShader: /* glsl */ `
       precision highp float;
       ${NOISE}
+      ${NOISE_D}
       ${SLAB_GLSL}
       uniform sampler2D uProfile;
       uniform float uAdvect, uTime, uSurface, uPlates, uMantle, uMagma, uCrust, uLith, uAsth, uTemp;
@@ -130,14 +131,15 @@ export function buildSection(profile: Float32Array) {
           if (uSurface < .5) discard;
           float edgeW = 1. - smoothstep(eta - aa, eta + aa * .5, yo);
           float d = clamp(-yo / 40., 0., 1.);
-          vec3 wc = mix(vec3(.12,.33,.48), vec3(.03,.1,.19), pow(d, .7));
+          vec3 wc = mix(vec3(.1,.28,.36), vec3(.02,.07,.12), pow(d, .6));
           wc += .025 * vnoise(vec2(x * .15 + uTime * .2, yo * .3));
           wc = mix(wc, vec3(.55,.75,.85), smoothstep(.2, 2., eta) * smoothstep(-6., 0., yo) * .6);
-          gl_FragColor = vec4(wc, edgeW);
+          gl_FragColor = vec4(wc * wc * 1.1, edgeW);
           return;
         }
         float edgeA = 1. - smoothstep(top - aa, top + aa * .5, y);
 
+        vec3 glow = vec3(0.);
         vec2 sn = slabSN(p);
         float s = sn.x, n = sn.y;
         float moho = mohoY(x), lab = labY(x);
@@ -165,7 +167,7 @@ export function buildSection(profile: Float32Array) {
         vec3 gabbro = vec3(.28,.28,.28) * (.86 + .2 * pn) * (.96 + .06 * dikes * (1. - smoothstep(OCRUST * .5, OCRUST * .7, n)));
         vec3 ocrust = mix(basalt, gabbro, smoothstep(OCRUST * .4, OCRUST * .7, n));
         ocrust = mix(sed, ocrust, smoothstep(.7, 1.6, n));
-        vec3 olm = vec3(.3,.3,.31) * (.82 + .26 * pn);
+        vec3 olm = vec3(.27,.27,.29) * (.82 + .26 * pn);
         vec3 plate = mix(ocrust, olm, smoothstep(OCRUST - aa, OCRUST + aa, n));
         plate *= mix(1.14, .8, smoothstep(0., SLAB_H, n));
         plate = mix(plate, plate * vec3(1.15, .98, .9), smoothstep(150., 450., s) * .6);
@@ -175,7 +177,7 @@ export function buildSection(profile: Float32Array) {
 
         // continental crust: gently folded strata, granite plutons under the arc
         float warp = fbm3(p * vec2(.03, .06)) * 14.;
-        float strata = sin((y + warp) * .7) * .5 + .5;
+        float strata = smoothstep(.15, .85, sin((y + warp) * .7) * .5 + .5);
         vec3 ucrust = mix(vec3(.43,.35,.27), vec3(.37,.3,.24), strata) * (.9 + .16 * mm2);
         vec3 lcrust = mix(vec3(.3,.27,.25), vec3(.27,.24,.22), strata) * (.9 + .14 * mm2);
         vec3 ccrust = mix(lcrust, ucrust, smoothstep(moho * .45 - 4., moho * .45 + 4., y));
@@ -222,6 +224,7 @@ export function buildSection(profile: Float32Array) {
           float front = 160. * uSince;
           float rup = onFault * step(abs(s - HYPO_S), front) * exp(-uSince * 1.6);
           col = mix(col, vec3(1., .95, .8), clamp(rup, 0., 1.) * uQuakes);
+          glow += vec3(1., .8, .5) * clamp(rup, 0., 1.) * 2.5 * uQuakes + vec3(1., .6, .2) * onFault * build * .25 * uQuakes;
           // seismic waves: P then S
           float r = length(p - HYPO);
           float wP = line(r - 230. * uSince, aa, .9 + uSince * .6) * exp(-uSince / 1.4);
@@ -241,7 +244,7 @@ export function buildSection(profile: Float32Array) {
           float flick = .85 + .15 * sin(uTime * 1.3 + x * .2);
           vec3 meltCol = vec3(.95,.38,.1);
           col = mix(col, meltCol, melt * (.18 + .5 * grains) * flick * uMagma);
-          col += meltCol * melt * .08 * uMagma;
+          glow += vec3(1., .3, .05) * melt * grains * .35 * uMagma;
           // crustal storage: crystal mush with a little melt
           vec2 cq = (p - CHAMBER.xy) / CHAMBER.zw;
           float ce = dot(cq, cq);
@@ -254,6 +257,7 @@ export function buildSection(profile: Float32Array) {
           cond *= smoothstep(CHAMBER.y + CHAMBER.w * .4, CHAMBER.y + CHAMBER.w + 3., y);
           vec3 condCol = mix(vec3(.75,.22,.06), vec3(1.,.55,.15), smoothstep(CHAMBER.y, 8., y));
           col = mix(col, condCol * (.7 + .45 * uErupt), cond * (.55 + .45 * uErupt) * uMagma);
+          glow += vec3(1., .35, .06) * (cond * (.4 + 1.6 * uErupt) + cham * (.15 + .5 * uErupt) * smoothstep(.8, .1, ce)) * uMagma;
         }
 
         // ---------- temperature evidence ----------
@@ -289,9 +293,18 @@ export function buildSection(profile: Float32Array) {
           col = mix(col, tc, .82 * uTemp);
         }
 
-        // cinematic depth falloff and soft vignette on the cut face
-        col *= mix(1.05, .7, smoothstep(-20., ${SECTION_BOTTOM.toFixed(1)}, y));
-        gl_FragColor = vec4(col, edgeA);
+        // cinematic depth falloff on the cut face
+        col *= mix(1.05, .68, smoothstep(-20., ${SECTION_BOTTOM.toFixed(1)}, y));
+        // carved-rock relief: the cut face is lit by a soft key light from the upper left
+        vec2 bg = noised(p * .16 + 3.1).yz * .16 * 5. + noised(p * .62 + 7.7).yz * .62 * 1.1 + noised(p * 2.1).yz * 2.1 * .12;
+        float rockK = 1. - inPrism * .3;
+        vec3 fn = normalize(vec3(-bg * .65 * rockK, 1.));
+        float relief = .8 + .32 * dot(fn, normalize(vec3(-.55, .62, .56)));
+        col *= relief;
+        // to linear light (scene colors above were authored in display space)
+        vec3 lc = col * col * 1.05;
+        // glowing material emits light: keep magma and quake flashes bright enough to bloom
+        gl_FragColor = vec4(lc + glow, edgeA);
       }`,
   });
   const mesh = new THREE.Mesh(geo, material);

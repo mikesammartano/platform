@@ -3,13 +3,13 @@ import { prefersReducedMotion, useApp } from '../state/store';
 import type { FocusKey, LabelKey, SceneState, ViewMode } from '../state/types';
 import { type Pose, FOCUS_POSES, VIEW_POSES, poseFor } from './cameras';
 import { buildGpsArrows, buildMagma, buildMantleFlow, buildMotionArrows, buildPlume, buildQuakes, buildWater } from './effects';
-import { SUN_DIR, buildOcean, buildSky } from './environment';
+import { KEY_DIR, SUN_DIR, buildOcean, buildSky } from './environment';
 import { DEFAULT_LABELS, LABELS } from './labels';
-import { SECTION_BOTTOM, X_MAX, X_MIN, cycleAt } from './model';
+import { SECTION_BOTTOM, X_MAX, X_MIN, Z_FAR, cycleAt } from './model';
+import { buildPost } from './post';
 import { buildSection } from './section';
-import { TERRAIN_NX, buildTerrain, heightAt } from './terrain';
+import { TERRAIN_NX, TERRAIN_NZ, type TerrainArrays, buildTerrain, heightAt } from './terrain';
 
-THREE.ColorManagement.enabled = false;
 
 /** One full cycle of the playback timeline, in seconds at 1x. */
 export const LOOP_SECONDS = 60;
@@ -49,6 +49,8 @@ export class Engine {
   private maxDpr = 1;
   private adapted = false;
   private shown = false;
+  /** Bloom is the first thing dropped on slow GPUs. */
+  private bloomOn = true;
   private perf = { acc: 0, frames: 0, slow: 0, fast: 0 };
 
   private labels = new Map<LabelKey, LabelHandle>();
@@ -59,9 +61,9 @@ export class Engine {
   private unsub: () => void;
 
   private sky = buildSky();
-  private terrain = buildTerrain(SUN_DIR);
-  private ocean = buildOcean(this.terrain.heightTex, this.terrain.heightTexBounds);
-  private section = buildSection(this.terrain.profile);
+  private terrain: ReturnType<typeof buildTerrain>;
+  private ocean: ReturnType<typeof buildOcean>;
+  private section: ReturnType<typeof buildSection>;
   private quakes = buildQuakes();
   private magma = buildMagma();
   private water = buildWater();
@@ -69,13 +71,38 @@ export class Engine {
   private plume = buildPlume();
   private arrows = buildMotionArrows();
   private gps = buildGpsArrows();
+  private post!: ReturnType<typeof buildPost>;
 
-  constructor(canvas: HTMLCanvasElement) {
+  /** Generates the landscape in a worker (falls back to the main thread), then builds the engine. */
+  static async create(canvas: HTMLCanvasElement): Promise<Engine> {
+    let data: TerrainArrays | undefined;
+    try {
+      const worker = new Worker(new URL('./terrain.worker.ts', import.meta.url), { type: 'module' });
+      data = await new Promise<TerrainArrays>((resolve, reject) => {
+        worker.onmessage = (e) => resolve(e.data);
+        worker.onerror = reject;
+        worker.postMessage({ x: KEY_DIR.x, y: KEY_DIR.y, z: KEY_DIR.z });
+      });
+      worker.terminate();
+    } catch {
+      data = undefined;
+    }
+    return new Engine(canvas, data);
+  }
+
+  constructor(canvas: HTMLCanvasElement, data?: TerrainArrays) {
+    this.terrain = buildTerrain(KEY_DIR, data);
+    this.ocean = buildOcean(this.terrain.heightTex, this.terrain.heightTexBounds);
+    this.section = buildSection(this.terrain.profile);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', alpha: false });
-    this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.85;
     this.renderer.setClearColor('#050505');
     this.renderer.setPixelRatio(this.dpr);
 
+    this.post = buildPost(this.renderer, this.scene, this.camera);
+    this.terrain.material.uniforms.uSkySun.value.copy(SUN_DIR);
     this.scene.add(
       this.sky.mesh, this.terrain.mesh, this.ocean.mesh, this.section.mesh, this.quakes.points, this.magma.points,
       this.water.points, this.flow.points, this.plume.group, this.arrows.group, this.gps.group,
@@ -117,6 +144,7 @@ export class Engine {
     this.dpr = this.adapted ? Math.min(this.dpr, this.maxDpr) : this.maxDpr;
     this.renderer.setPixelRatio(this.dpr);
     this.renderer.setSize(width, height, false);
+    this.post.setSize(width, height, this.dpr);
     this.camera.aspect = width / height;
     this.updateProjection();
     this.dirty = true;
@@ -174,7 +202,7 @@ export class Engine {
       const x = o.x + d.x * t;
       const z = o.z + d.z * t;
       if (z > 0) return false;
-      return o.y + d.y * t < Math.max(heightAt(x, z), 0);
+      return o.y + d.y * t < Math.max(this.gridHeight(x, z), 0);
     };
     let prev = 0;
     for (let t = 2; t < 7000; t += Math.max(2, t * 0.012)) {
@@ -191,6 +219,21 @@ export class Engine {
       prev = t;
     }
     return [o.x + d.x * 1500, o.y + d.y * 1500, o.z + d.z * 1500];
+  }
+
+  /** Bilinear height from the terrain mesh itself (much cheaper than evaluating the noise). */
+  private gridHeight(x: number, z: number) {
+    if (x < X_MIN || x > X_MAX || z < Z_FAR) return heightAt(x, z);
+    const pos = this.terrain.mesh.geometry.getAttribute('position').array as Float32Array;
+    const nx = TERRAIN_NX;
+    const fi = ((x - X_MIN) / (X_MAX - X_MIN)) * nx;
+    const fj = TERRAIN_NZ * Math.pow(Math.min(1, Math.max(0, z / Z_FAR)), 1 / 2.1);
+    const i = Math.min(nx - 1, Math.floor(fi));
+    const j = Math.min(TERRAIN_NZ - 1, Math.floor(fj));
+    const u = fi - i;
+    const v = fj - j;
+    const h = (ii: number, jj: number) => pos[(jj * (nx + 1) + ii) * 3 + 1];
+    return (h(i, j) * (1 - u) + h(i + 1, j) * u) * (1 - v) + (h(i, j + 1) * (1 - u) + h(i + 1, j + 1) * u) * v;
   }
 
   private profileAt(x: number) {
@@ -226,16 +269,10 @@ export class Engine {
     cam.position.set(...pose.pos);
     cam.lookAt(...pose.target);
     const scale = 2;
-    const rt = new THREE.WebGLRenderTarget(w * scale, h * scale, { samples: 4 });
     const prevSky = this.sky.mesh.position.clone();
     this.sky.mesh.position.copy(cam.position);
     this.terrain.material.uniforms.uCamPos.value.copy(cam.position);
-    this.renderer.setRenderTarget(rt);
-    this.renderer.render(this.scene, cam);
-    const buf = new Uint8Array(w * scale * h * scale * 4);
-    this.renderer.readRenderTargetPixels(rt, 0, 0, w * scale, h * scale, buf);
-    this.renderer.setRenderTarget(null);
-    rt.dispose();
+    const buf = this.post.capture(cam, w * scale, h * scale);
     this.sky.mesh.position.copy(prevSky);
     const c = document.createElement('canvas');
     c.width = w * scale;
@@ -376,7 +413,7 @@ export class Engine {
     this.dirty = false;
 
     this.update(simDt);
-    this.renderer.render(this.scene, this.camera);
+    this.post.render(this.modelTime, this.bloomOn);
     if (!this.shown) {
       this.shown = true;
       this.renderer.domElement.dataset.ready = '1';
@@ -456,7 +493,7 @@ export class Engine {
 
     const vo = f('volcanoes');
     this.plume.group.visible = vo > 0.01;
-    if (vo > 0.01) this.plume.update(t, vo);
+    if (vo > 0.01) this.plume.update(t, vo, this.camera.position);
 
     const ar = f('motionArrows');
     this.arrows.group.visible = ar > 0.01;
@@ -517,18 +554,26 @@ export class Engine {
     else p.slow = 0;
     if (avg < 1 / 55) p.fast++;
     else p.fast = 0;
-    if (p.slow >= 2 && this.dpr > 0.5) {
-      this.dpr = Math.max(0.5, this.dpr - 0.2);
+    // Slow GPU: drop bloom first, then resolution. Fast again: restore resolution, then bloom.
+    if (p.slow >= 2 && (this.bloomOn || this.dpr > 0.5)) {
+      if (this.bloomOn) this.bloomOn = false;
+      else this.dpr = Math.max(0.5, this.dpr - 0.2);
       this.adapted = true;
-      this.renderer.setPixelRatio(this.dpr);
-      this.renderer.setSize(this.width, this.height, false);
+      this.applySize();
       p.slow = 0;
-    } else if (p.fast >= 5 && this.dpr < this.maxDpr) {
-      this.dpr = Math.min(this.maxDpr, this.dpr + 0.2);
-      this.renderer.setPixelRatio(this.dpr);
-      this.renderer.setSize(this.width, this.height, false);
+    } else if (p.fast >= 5 && (this.dpr < this.maxDpr || !this.bloomOn)) {
+      if (this.dpr < this.maxDpr) this.dpr = Math.min(this.maxDpr, this.dpr + 0.2);
+      else this.bloomOn = true;
+      this.applySize();
       p.fast = 0;
     }
+  }
+
+  private applySize() {
+    this.renderer.setPixelRatio(this.dpr);
+    this.renderer.setSize(this.width, this.height, false);
+    this.post.setSize(this.width, this.height, this.dpr);
+    this.dirty = true;
   }
 }
 

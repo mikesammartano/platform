@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ARC_X, COAST_X, LAND_VE, VE, VOLCANO, X_MAX, X_MIN, Z_FAR, prng, seafloorAnalytic } from './model';
-import { NOISE } from './glsl';
+import { ATMOS, NOISE, NOISE_D } from './glsl';
 
 // ---------- CPU value noise (terrain heights) ----------
 const PERM = (() => {
@@ -28,6 +28,25 @@ function noise2(x: number, y: number) {
   const d = grad(ix + 1, iy + 1);
   return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
 }
+/** Value noise with derivatives (quintic), used for erosion-like relief. */
+function noised(x: number, y: number): [number, number, number] {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+  const uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+  const dux = 30 * fx * fx * (fx * (fx - 2) + 1);
+  const duy = 30 * fy * fy * (fy * (fy - 2) + 1);
+  const a = grad(ix, iy);
+  const b = grad(ix + 1, iy);
+  const c = grad(ix, iy + 1);
+  const d = grad(ix + 1, iy + 1);
+  const k1 = b - a;
+  const k2 = c - a;
+  const k4 = a - b - c + d;
+  return [a + k1 * ux + k2 * uy + k4 * ux * uy, dux * (k1 + k4 * uy), duy * (k2 + k4 * ux)];
+}
 function fbm(x: number, y: number, oct = 5) {
   let s = 0;
   let a = 0.5;
@@ -40,7 +59,7 @@ function fbm(x: number, y: number, oct = 5) {
   }
   return s;
 }
-function ridged(x: number, y: number, oct = 6) {
+function ridged(x: number, y: number, oct = 5) {
   let s = 0;
   let a = 0.5;
   let w = 1;
@@ -51,6 +70,27 @@ function ridged(x: number, y: number, oct = 6) {
     s += a * n;
     const nx = 1.7 * x - 1.1 * y;
     y = 1.1 * x + 1.7 * y;
+    x = nx;
+    a *= 0.5;
+  }
+  return s;
+}
+/**
+ * "Eroded" fbm: octaves are damped where the accumulated slope is steep, which leaves sharp ridges,
+ * smooth valley floors and dendritic gullies, like water-carved mountains.
+ */
+function eroded(x: number, y: number, oct = 7) {
+  let s = 0;
+  let a = 0.5;
+  let dx = 0;
+  let dy = 0;
+  for (let i = 0; i < oct; i++) {
+    const [v, gx, gy] = noised(x, y);
+    dx += gx;
+    dy += gy;
+    s += (a * v) / (1 + dx * dx + dy * dy);
+    const nx = 1.6 * x - 1.2 * y;
+    y = 1.2 * x + 1.6 * y;
     x = nx;
     a *= 0.5;
   }
@@ -98,11 +138,11 @@ function landProfile(x: number, z: number) {
   const plateau = 13 * smooth(ARC_X - 10, ARC_X + 60, x) * (1 - smooth(ARC_X + 260, ARC_X + 380, x));
   const eastern = 8 * bump(x, ARC_X + 330, 45);
   const base = 1 + coastal + Math.max(cordillera, plateau) + eastern;
-  const massif = ridged(x / 120 + 3.1, z / 120 + 17);
-  const detail = ridged(x / 34, z / 34 + 5);
-  const relief = (1.6 + 0.85 * base) * (0.95 * massif + 0.38 * detail - 0.22) * ruggedMask;
-  const lowNoise = (fbm(x / 25, z / 25) - 0.5) * 1.6;
-  const h = base + relief - 1.6 * ruggedMask + lowNoise;
+  const crest = ridged(x / 140 + 3.1, z / 140 + 17);
+  const carved = eroded(x / 75 + 9.3, z / 75 - 2.7);
+  const relief = (1.6 + 0.9 * base) * (0.55 * crest + 1.05 * carved - 0.42) * ruggedMask;
+  const lowNoise = (fbm(x / 25, z / 25) - 0.5) * 1.4;
+  const h = base + relief - 1.2 * ruggedMask + lowNoise;
   // inland lowlands stay above sea level
   return x > COAST_X + 8 ? Math.max(h, 0.35 + 0.3 * smooth(COAST_X, COAST_X + 30, x)) : h;
 }
@@ -114,10 +154,12 @@ export function heightAt(x: number, z: number) {
     const d = Math.hypot(x - v.x, z - v.z);
     if (d < v.r) {
       const t = 1 - d / v.r;
-      const ribs = 1 + 0.06 * Math.sin(Math.atan2(z - v.z, x - v.x) * 11) * t;
-      const cone = v.h * Math.pow(t, 1.5) * ribs;
-      const craterR = 0.13 * v.r;
-      const crater = d < craterR ? 1.1 * (1 - (d / craterR) ** 2) : 0;
+      // concave stratovolcano profile with erosion gullies down the flanks
+      const ang = Math.atan2(z - v.z, x - v.x);
+      const gullies = 1 - 0.07 * Math.pow(Math.abs(Math.sin(ang * 9 + fbm(x / 6, z / 6) * 3)), 3) * (1 - t);
+      const cone = v.h * Math.pow(t, 1.6) * gullies;
+      const craterR = 0.12 * v.r;
+      const crater = d < craterR ? 1.3 * (1 - (d / craterR) ** 2) : 0;
       // the cone builds on the range, smoothing rugged relief near its summit
       h = h + (14 - h) * 0.45 * t + cone - crater;
     }
@@ -142,24 +184,120 @@ export type TerrainData = {
 export const zAt = (j: number) => Z_FAR * Math.pow(j / TERRAIN_NZ, 2.1);
 export const xAt = (i: number) => X_MIN + ((X_MAX - X_MIN) * i) / TERRAIN_NX;
 
-export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
+/**
+ * Bakes sun visibility (soft shadows) and sky visibility (ambient occlusion) from the height grid.
+ * Computed on a half-resolution grid and interpolated per vertex: about 4.5M height lookups.
+ */
+function bakeLight(H: Float32Array, nx: number, nz: number, sun: { x: number; y: number; z: number }) {
+  const jOf = (z: number) => nz * Math.pow(Math.min(1, Math.max(0, z / Z_FAR)), 1 / 2.1);
+  const sample = (x: number, z: number) => {
+    if (z > 0 || x < X_MIN || x > X_MAX) return -1e9;
+    const fi = ((x - X_MIN) / (X_MAX - X_MIN)) * nx;
+    const fj = jOf(z);
+    const i = Math.min(nx - 1, Math.floor(fi));
+    const j = Math.min(nz - 1, Math.floor(fj));
+    const u = fi - i;
+    const v = fj - j;
+    const r0 = j * (nx + 1);
+    const r1 = r0 + nx + 1;
+    const a = H[r0 + i] * (1 - u) + H[r0 + i + 1] * u;
+    const b = H[r1 + i] * (1 - u) + H[r1 + i + 1] * u;
+    return Math.max(a * (1 - v) + b * v, 0);
+  };
+  const lh = Math.hypot(sun.x, sun.z);
+  const lx = sun.x / lh;
+  const lz = sun.z / lh;
+  const rise = sun.y / lh;
+  const DIRS = 8;
+  const dirs = Array.from({ length: DIRS }, (_, k) => [Math.cos((k / DIRS) * Math.PI * 2), Math.sin((k / DIRS) * Math.PI * 2)]);
+  const RADII = [5, 12, 26, 50, 90];
+  const hx = Math.ceil(nx / 2) + 1;
+  const hz = Math.ceil(nz / 2) + 1;
+  const shadowHalf = new Float32Array(hx * hz);
+  const aoHalf = new Float32Array(hx * hz);
+  for (let jj = 0; jj < hz; jj++) {
+    const j = Math.min(nz, jj * 2);
+    const z = zAt(j);
+    for (let ii = 0; ii < hx; ii++) {
+      const i = Math.min(nx, ii * 2);
+      const x = xAt(i);
+      const h = Math.max(H[j * (nx + 1) + i], 0) + 0.3;
+      // soft shadow: smallest clearance angle along the ray toward the sun
+      let vis = 1;
+      for (let t = 2; t < 700; t *= 1.09) {
+        const d = h + rise * t - sample(x + lx * t, z + lz * t);
+        vis = Math.min(vis, (10 * d) / t);
+        if (vis <= 0) break;
+        t += 1.5;
+      }
+      shadowHalf[jj * hx + ii] = Math.max(0, Math.min(1, vis));
+      // ambient occlusion: average horizon elevation around the point
+      let occ = 0;
+      for (const [dx, dz] of dirs) {
+        let maxSin = 0;
+        for (const r of RADII) {
+          const e = sample(x + dx * r, z + dz * r) - h;
+          if (e > 0) maxSin = Math.max(maxSin, e / Math.hypot(e, r));
+        }
+        occ += maxSin;
+      }
+      aoHalf[jj * hx + ii] = 1 - Math.min(0.85, (occ / DIRS) * 1.15);
+    }
+  }
+  const light = new Float32Array((nx + 1) * (nz + 1) * 2);
+  for (let j = 0; j <= nz; j++) {
+    const fj = j / 2;
+    const j0 = Math.min(hz - 2, Math.floor(fj));
+    const v = fj - j0;
+    for (let i = 0; i <= nx; i++) {
+      const fi = i / 2;
+      const i0 = Math.min(hx - 2, Math.floor(fi));
+      const u = fi - i0;
+      const k00 = j0 * hx + i0;
+      const k10 = k00 + 1;
+      const k01 = k00 + hx;
+      const k11 = k01 + 1;
+      const bil = (A: Float32Array) => (A[k00] * (1 - u) + A[k10] * u) * (1 - v) + (A[k01] * (1 - u) + A[k11] * u) * v;
+      const k = (j * (nx + 1) + i) * 2;
+      light[k] = bil(aoHalf);
+      light[k + 1] = bil(shadowHalf);
+    }
+  }
+  return light;
+}
+
+export type TerrainArrays = {
+  pos: Float32Array;
+  light: Float32Array;
+  index: Uint32Array;
+  profile: Float32Array;
+  heights: Uint16Array;
+  tw: number;
+  th: number;
+  bounds: [number, number, number, number];
+};
+
+/** Heavy CPU work (heights, baked light, ocean depth map). Runs in a Web Worker in the app. */
+export function computeTerrain(sun: { x: number; y: number; z: number }): TerrainArrays {
   const nx = TERRAIN_NX;
   const nz = TERRAIN_NZ;
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3);
+  const H = new Float32Array((nx + 1) * (nz + 1));
   const profile = new Float32Array(nx + 1);
   for (let j = 0; j <= nz; j++) {
     const z = zAt(j);
     for (let i = 0; i <= nx; i++) {
       const x = xAt(i);
       const h = heightAt(x, z);
-      const k = (j * (nx + 1) + i) * 3;
-      pos[k] = x;
-      pos[k + 1] = h;
-      pos[k + 2] = z;
+      const k = j * (nx + 1) + i;
+      pos[k * 3] = x;
+      pos[k * 3 + 1] = h;
+      pos[k * 3 + 2] = z;
+      H[k] = h;
       if (j === 0) profile[i] = h;
     }
   }
-  const idx = new Uint32Array(nx * nz * 6);
+  const index = new Uint32Array(nx * nz * 6);
   let p = 0;
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
@@ -168,29 +306,36 @@ export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
       const c = a + nx + 1;
       const d = c + 1;
       // rows go toward -z, so wind to face +y
-      idx[p++] = a; idx[p++] = b; idx[p++] = c;
-      idx[p++] = b; idx[p++] = d; idx[p++] = c;
+      index[p++] = a; index[p++] = b; index[p++] = c;
+      index[p++] = b; index[p++] = d; index[p++] = c;
     }
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
-  geo.computeBoundingSphere();
-
-  // Height texture for the ocean shader (water depth -> color, foam).
+  const light = bakeLight(H, nx, nz, sun);
+  // Height map for the ocean shader (water depth -> color, foam).
   const tw = 384;
   const th = 192;
-  const bounds = new THREE.Vector4(-900, 700, -1400, 0); // xmin, xmax, zmin, zmax
-  const hdata = new Uint16Array(tw * th);
+  const bounds: [number, number, number, number] = [-900, 700, -1400, 0]; // xmin, xmax, zmin, zmax
+  const heights = new Uint16Array(tw * th);
   for (let j = 0; j < th; j++) {
-    const z = bounds.z + ((bounds.w - bounds.z) * j) / (th - 1);
+    const z = bounds[2] + ((bounds[3] - bounds[2]) * j) / (th - 1);
     for (let i = 0; i < tw; i++) {
-      const x = bounds.x + ((bounds.y - bounds.x) * i) / (tw - 1);
-      hdata[j * tw + i] = THREE.DataUtils.toHalfFloat(heightAt(x, z));
+      const x = bounds[0] + ((bounds[1] - bounds[0]) * i) / (tw - 1);
+      heights[j * tw + i] = THREE.DataUtils.toHalfFloat(heightAt(x, z));
     }
   }
-  const heightTex = new THREE.DataTexture(hdata, tw, th, THREE.RedFormat, THREE.HalfFloatType);
+  return { pos, light, index, profile, heights, tw, th, bounds };
+}
+
+export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays = computeTerrain(sunDir)): TerrainData {
+  const { pos, light, index, profile, heights, tw, th } = data;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aLight', new THREE.BufferAttribute(light, 2));
+  geo.setIndex(new THREE.BufferAttribute(index, 1));
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  const bounds = new THREE.Vector4(...data.bounds);
+  const heightTex = new THREE.DataTexture(heights, tw, th, THREE.RedFormat, THREE.HalfFloatType);
   heightTex.magFilter = THREE.LinearFilter;
   heightTex.minFilter = THREE.LinearFilter;
   heightTex.needsUpdate = true;
@@ -198,8 +343,7 @@ export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uSun: { value: sunDir },
-      uFogColor: { value: new THREE.Color(0.6, 0.69, 0.79) },
-      uFogDensity: { value: 0.00042 },
+      uSkySun: { value: new THREE.Vector3() },
       uBathy: { value: 0 },
       uTopo: { value: 0 },
       uCamPos: { value: new THREE.Vector3() },
@@ -207,17 +351,21 @@ export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
       uErupt: { value: 0 },
     },
     vertexShader: /* glsl */ `
-      varying vec3 vPos; varying vec3 vNormal;
+      attribute vec2 aLight;
+      varying vec3 vPos; varying vec3 vNormal; varying vec2 vLight;
       void main(){
-        vPos = position; vNormal = normal;
+        vPos = position; vNormal = normal; vLight = aLight;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
       }`,
     fragmentShader: /* glsl */ `
       precision highp float;
       ${NOISE}
-      uniform vec3 uSun; uniform vec3 uFogColor; uniform float uFogDensity; uniform vec3 uCamPos;
+      ${NOISE_D}
+      ${ATMOS}
+      uniform vec3 uSun; uniform vec3 uSkySun; uniform vec3 uCamPos;
       uniform float uBathy; uniform float uTopo; uniform vec3 uVolc[4]; uniform float uErupt;
-      varying vec3 vPos; varying vec3 vNormal;
+      varying vec3 vPos; varying vec3 vNormal; varying vec2 vLight;
+      vec3 lin(vec3 c){ return c * c; }
       vec3 ramp5(float t, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e){
         t = clamp(t, 0., 1.) * 4.;
         if (t < 1.) return mix(a, b, t);
@@ -225,74 +373,119 @@ export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
         if (t < 3.) return mix(c, d, t - 2.);
         return mix(d, e, t - 3.);
       }
+      // perturbs a normal with derivative noise; fades with distance to avoid shimmer
+      vec3 detailNormal(vec3 n, vec2 q, float scale, float strength, float fade){
+        vec2 g = vec2(0.);
+        float a = 1.;
+        vec2 p = q * scale;
+        for (int i = 0; i < 3; i++){
+          g += noised(p).yz * a * scale;
+          p = ROT * p; a *= .5; scale *= 2.;
+        }
+        return normalize(n - vec3(g.x, 0., g.y) * strength * fade);
+      }
       void main(){
-        vec3 n = normalize(vNormal);
+        vec3 n0 = normalize(vNormal);
         float h = vPos.y;
-        float slope = 1. - n.y;
         vec2 q = vPos.xz;
-        float nz = fbm3(q * .08);
-        float nz2 = vnoise(q * .6);
-        // base colors
-        vec3 deep = vec3(.11, .13, .15);
-        vec3 sand = vec3(.62, .55, .42);
-        vec3 grass = mix(vec3(.16, .25, .11), vec3(.3, .33, .16), nz);
-        vec3 dry = mix(vec3(.45, .37, .26), vec3(.38, .3, .22), nz2);
-        vec3 rock = mix(vec3(.31, .27, .24), vec3(.46, .41, .36), nz);
-        vec3 darkRock = vec3(.2, .18, .17);
-        vec3 snow = vec3(.92, .94, .97);
-        vec3 col;
-        if (h < -0.2) {
-          col = mix(vec3(.36, .33, .27), deep, smoothstep(-1., -14., h));
+        float dist = length(vPos - uCamPos);
+        float fade = 1. - smoothstep(250., 1600., dist);
+        float slope = 1. - n0.y;
+        float nz = fbm3(q * .05);
+        float nzF = fbm3(q * .4);
+
+        // ---------- materials (albedo, linear) ----------
+        float cliff = smoothstep(.3, .55, slope + (nz - .5) * .2);
+        float strata = .5 + .5 * sin(h * 1.7 + nzF * 3. + nz * 6.);
+        vec3 rockA = mix(lin(vec3(.33, .29, .26)), lin(vec3(.42, .36, .3)), strata);
+        vec3 rockB = lin(vec3(.27, .25, .24));
+        vec3 rock = mix(rockB, rockA, smoothstep(.3, .7, nzF)) * (.8 + .4 * nz);
+        vec3 scree = lin(vec3(.42, .37, .32)) * (.85 + .3 * nzF);
+        float forestN = fbm3(q * .12 + 7.);
+        vec3 forest = lin(vec3(.1, .17, .08)) * (.6 + .5 * nzF);
+        // lowland grassland: muted, patchy mix of green and sun-dried grass
+        float patchN = fbm3(q * .012 + 3.);
+        vec3 meadow = mix(lin(vec3(.3, .36, .17)), lin(vec3(.48, .44, .27)), smoothstep(.35, .65, patchN)) * (.85 + .3 * nzF);
+        vec3 dry = mix(lin(vec3(.47, .38, .26)), lin(vec3(.38, .3, .21)), nzF);
+        vec3 sand = lin(vec3(.76, .69, .55));
+        vec3 wetSand = lin(vec3(.45, .4, .31));
+        vec3 snow = lin(vec3(.95, .96, .98));
+        vec3 ash = lin(vec3(.2, .19, .19)) * (.8 + .4 * nzF);
+
+        vec3 alb;
+        float rough = 1.;
+        float detailK = .5;
+        if (h < -.15) {
+          alb = mix(wetSand, lin(vec3(.13, .14, .14)), smoothstep(-1., -16., h));
         } else {
-          col = mix(sand, grass, smoothstep(.3, 1.6, h));
-          col = mix(col, dry, smoothstep(14., 34., h + nz * 12.));
-          col = mix(col, rock, smoothstep(.22, .5, slope + nz * .15) * smoothstep(2., 12., h));
-          col = mix(col, rock * .9, smoothstep(30., 44., h));
-          // volcanic ash and lava rock near arc volcanoes
+          float veg = smoothstep(.5, 2., h) * (1. - smoothstep(18., 36., h + nz * 14.));
+          vec3 green = mix(meadow, forest, smoothstep(.4, .7, forestN) * .85);
+          alb = mix(mix(sand, wetSand, 1. - smoothstep(.0, .35, h)), green, veg);
+          alb = mix(alb, dry, smoothstep(14., 32., h + nz * 12.) * (1. - veg * .5));
+          alb = mix(alb, scree, smoothstep(.18, .32, slope) * smoothstep(4., 14., h));
+          alb = mix(alb, rock, cliff * smoothstep(2., 10., h));
+          alb = mix(alb, rock * .85, smoothstep(34., 48., h) * .8);
+          // volcanic ash and dark lava rock around arc volcanoes
           for (int i = 0; i < 4; i++){
             float d = length(q - uVolc[i].xy) / uVolc[i].z;
-            col = mix(col, darkRock * (.85 + .3 * nz2), (1. - smoothstep(.55, 1.05, d)) * .85);
+            alb = mix(alb, ash, (1. - smoothstep(.5, 1.1, d)) * .9);
           }
-          float snowLine = 50. + nz * 9. - slope * 10.;
-          col = mix(col, snow, smoothstep(snowLine, snowLine + 3., h) * (1. - smoothstep(.6, .85, slope)));
+          // snow: above the snow line, on gentle slopes, thicker on shaded aspects
+          float aspect = dot(normalize(vec3(n0.x, 0., n0.z) + 1e-4), -uSun);
+          float snowLine = 41. + nz * 10. - aspect * 5.;
+          float snowK = smoothstep(snowLine, snowLine + 4., h) * (1. - smoothstep(.5, .78, slope + (nzF - .5) * .25));
+          alb = mix(alb, snow, snowK);
+          detailK = mix(mix(.35, .9, cliff), .15, snowK);
+          rough = mix(1., .55, snowK);
         }
-        // evidence overlays
+
+        // evidence overlays replace the albedo so colors stay readable under lighting
         if (uBathy > 0. && h < 0.) {
           float km = -h / 5.;
           vec3 b = ramp5(km / 8., vec3(.62,.9,.88), vec3(.24,.66,.8), vec3(.13,.4,.7), vec3(.12,.2,.52), vec3(.1,.06,.3));
           float c = abs(fract(km) - .5); float w = fwidth(km);
           b = mix(b * 1.25, b, smoothstep(.5 - w * 1.2, .5 - w * .2, .5 - c));
-          col = mix(col, b, uBathy);
+          alb = mix(alb, lin(b), uBathy);
         }
         if (uTopo > 0. && h > 0.) {
           float km = h / ${LAND_VE.toFixed(1)};
           vec3 t = ramp5(km / 6., vec3(.25,.48,.24), vec3(.66,.66,.32), vec3(.66,.44,.24), vec3(.48,.31,.24), vec3(.95,.94,.92));
           float c = abs(fract(km * 2.) - .5); float w = fwidth(km * 2.);
           t = mix(t * .55, t, smoothstep(.5 - w * 1.2, .5 - w * .2, .5 - c));
-          col = mix(col, t, uTopo);
+          alb = mix(alb, lin(t), uTopo);
         }
-        // lighting: warm low sun + sky ambient
-        // terrain is lit by a higher key light than the low sun seen in the sky, so relief reads clearly
-        vec3 L = normalize(vec3(-.62, .62, -.18));
-        float diff = max(dot(n, L), 0.);
-        vec3 sunCol = vec3(1.25, 1.08, .88);
-        vec3 amb = mix(vec3(.16, .18, .22), vec3(.34, .4, .5), n.y * .5 + .5);
-        vec3 lit = col * (amb + sunCol * diff * .95);
-        // fog
-        float dist = length(vPos - uCamPos);
-        float fog = 1. - exp(-pow(dist * uFogDensity, 1.35));
-        float hazeH = exp(-max(h, 0.) * .015);
-        lit = mix(lit, uFogColor, clamp(fog * (.65 + .35 * hazeH), 0., 1.));
+
+        // ---------- lighting (linear HDR) ----------
+        vec3 n = detailNormal(n0, q, .08, detailK * 1.4, fade);
+        float ao = vLight.x;
+        float sh = vLight.y;
+        float ndl = max(dot(n, uSun), 0.);
+        // wrap a little light around terminators for softer, more natural relief
+        float diff = max((dot(n, uSun) + .12) / 1.12, 0.) * sh;
+        vec3 sunCol = vec3(1., .86, .68) * 3.4;
+        vec3 skyCol = vec3(.42, .58, .95) * .5;
+        vec3 bounce = vec3(.3, .25, .18) * .22;
+        vec3 amb = mix(bounce, skyCol, n.y * .5 + .5) * ao;
+        vec3 col = alb * (sunCol * diff + amb);
+        // glancing sheen on snow and wet sand
+        vec3 V = normalize(uCamPos - vPos);
+        vec3 Hh = normalize(V + uSun);
+        float spec = pow(max(dot(n, Hh), 0.), mix(16., 60., 1. - rough)) * (1. - rough) * sh;
+        col += sunCol * spec * .25 * ndl;
+
         // lava on the upper flanks of the main volcano, brighter during eruption pulses
         if (uErupt > 0.) {
           vec2 dv = q - uVolc[0].xy;
           float dn = length(dv) / uVolc[0].z;
           float ang = atan(dv.y, dv.x);
           float ch = smoothstep(.82, .97, sin(ang * 4. + fbm3(q * .25) * 3.));
-          float lava = ch * (1. - smoothstep(.12, .5 + .1 * uErupt, dn)) * smoothstep(.04, .12, dn);
-          lit = mix(lit, vec3(1., .42, .1) * (1.1 + .5 * vnoise(q * 1.5)), lava * (.35 + .6 * uErupt));
+          float lava = ch * (1. - smoothstep(.12, .48 + .1 * uErupt, dn)) * smoothstep(.04, .12, dn);
+          vec3 hot = mix(vec3(1.6, .25, .03), vec3(5., 1.6, .3), vnoise(q * 1.4 + uErupt));
+          col = mix(col, hot * (.6 + 1.2 * uErupt), lava * (.4 + .6 * uErupt));
         }
-        gl_FragColor = vec4(lit, 1.);
+
+        col = aerial(col, vPos, uCamPos, uSkySun);
+        gl_FragColor = vec4(col, 1.);
       }`,
   });
   const mesh = new THREE.Mesh(geo, material);

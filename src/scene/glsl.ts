@@ -65,3 +65,42 @@ float labY(float x){
   return -90. + 12. * toArc - 47. * toInt;
 }
 `;
+
+/** Value noise with analytic derivatives (x: value, yz: gradient), for per-pixel detail normals. */
+export const NOISE_D = /* glsl */ `
+vec3 noised(vec2 x){
+  vec2 i = floor(x); vec2 f = fract(x);
+  vec2 u = f * f * f * (f * (f * 6. - 15.) + 10.);
+  vec2 du = 30. * f * f * (f * (f - 2.) + 1.);
+  float a = hash12(i), b = hash12(i + vec2(1., 0.)), c = hash12(i + vec2(0., 1.)), d = hash12(i + vec2(1., 1.));
+  float k1 = b - a, k2 = c - a, k4 = a - b - c + d;
+  return vec3(a + k1 * u.x + k2 * u.y + k4 * u.x * u.y, du * vec2(k1 + k4 * u.y, k2 + k4 * u.x));
+}
+`;
+
+/**
+ * Shared atmosphere (linear HDR). Sky radiance and aerial perspective use the same model so distant
+ * mountains and sea fade into exactly the sky color behind them.
+ */
+export const ATMOS = /* glsl */ `
+vec3 skyRadiance(vec3 dir, vec3 sun){
+  float h = max(dir.y, 0.);
+  float sd = max(dot(dir, sun), 0.);
+  vec3 zenith = vec3(.035, .11, .38);
+  vec3 horizon = vec3(.45, .58, .78);
+  vec3 c = mix(horizon, zenith, pow(h, .38));
+  // warm forward scattering around the low sun, strongest near the horizon
+  c += vec3(1.2, .72, .38) * pow(sd, 8.) * (1. - smoothstep(0., .45, h)) * .38;
+  c += vec3(1., .82, .6) * pow(sd, 220.) * .7;
+  return c;
+}
+vec3 aerial(vec3 col, vec3 P, vec3 cam, vec3 sun){
+  vec3 V = P - cam; float d = length(V); vec3 dir = V / max(d, 1e-3);
+  float hAvg = max(0., (P.y + cam.y) * .5);
+  float dens = .00011 * exp(-hAvg * .004);
+  float ext = exp(-pow(d * dens, 1.25));
+  vec3 dirH = normalize(vec3(dir.x, max(dir.y, .02), dir.z));
+  vec3 inscat = skyRadiance(dirH, sun) * .95;
+  return col * ext + inscat * (1. - ext);
+}
+`;

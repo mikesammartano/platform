@@ -1,22 +1,14 @@
 import * as THREE from 'three';
-import { NOISE } from './glsl';
+import { ATMOS, NOISE, NOISE_D } from './glsl';
 import { TSUNAMI_X } from './model';
 
-export const SUN_DIR = new THREE.Vector3(-0.78, 0.11, -0.62).normalize();
-export const FOG_COLOR = new THREE.Color(0.6, 0.69, 0.79);
-
-const SKY_FN = /* glsl */ `
-vec3 skyColor(vec3 dir, vec3 sun){
-  float h = dir.y;
-  vec3 zen = vec3(.14,.3,.54);
-  vec3 hor = vec3(.7,.78,.85);
-  vec3 c = mix(hor, zen, pow(clamp(h, 0., 1.), .5));
-  float sd = max(dot(dir, sun), 0.);
-  c = mix(c, vec3(1.,.83,.58), pow(sd, 3.) * (1. - smoothstep(0., .35, h)) * .75);
-  c += vec3(1.,.78,.5) * (pow(sd, 10.) * .35 + pow(sd, 400.) * 3.);
-  return c;
-}
-`;
+/** Late-afternoon sun low over the ocean, in the upper left of the default view. */
+export const SUN_DIR = new THREE.Vector3(-0.3, 0.12, -0.95).normalize();
+/**
+ * Key light for the landscape and baked shadows. It comes from the same side as the sun but higher,
+ * so the relief facing the class stays readable (a standard cinematography cheat).
+ */
+export const KEY_DIR = new THREE.Vector3(-0.6, 0.45, -0.25).normalize();
 
 export function buildSky() {
   const uniforms = { uSun: { value: SUN_DIR }, uTime: { value: 0 } };
@@ -33,24 +25,35 @@ export function buildSky() {
     fragmentShader: /* glsl */ `
       precision highp float;
       ${NOISE}
-      ${SKY_FN}
+      ${ATMOS}
       uniform vec3 uSun; uniform float uTime;
       varying vec3 vDir;
+      float cloudDensity(vec2 uv){
+        float base = fbm5(uv * 1.1);
+        float detail = fbm3(uv * 4.7 + base * 1.5);
+        return smoothstep(.56, .86, base + detail * .24);
+      }
       void main(){
         vec3 dir = normalize(vDir);
-        vec3 c = skyColor(dir, uSun);
+        vec3 c = skyRadiance(dir, uSun);
+        float sd = max(dot(dir, uSun), 0.);
+        // sun disc (very bright, so it blooms)
+        c += vec3(1., .88, .7) * smoothstep(.99955, .99985, sd) * 22.;
         if (dir.y > 0.) {
-          vec2 uv = dir.xz / (dir.y + .06) * 1.3 + vec2(uTime * .006, uTime * .002);
-          float base = fbm5(uv * 1.4);
-          float detail = fbm3(uv * 5.5);
-          float cov = smoothstep(.5, .78, base + detail * .18);
-          float sd = max(dot(dir, uSun), 0.);
-          vec3 shade = mix(vec3(.46,.5,.58), vec3(.98,.93,.85), smoothstep(.35, .9, detail));
-          shade = mix(shade, vec3(1.,.82,.6), pow(sd, 4.) * .7);
-          cov *= smoothstep(.0, .18, dir.y) * .92;
-          c = mix(c, shade, cov);
-        } else {
-          c = vec3(.6,.69,.79);
+          // a cloud deck on a plane overhead; light is marched toward the sun for self-shadowing
+          vec2 uv = dir.xz / (dir.y + .07) * 1.25 + vec2(uTime * .005, uTime * .0018);
+          float dens = cloudDensity(uv);
+          if (dens > .002) {
+            vec2 toSun = normalize(uSun.xz) * .08;
+            float shade = 0.;
+            for (int i = 1; i <= 3; i++) shade += cloudDensity(uv + toSun * float(i));
+            float light = exp(-shade * .9);
+            vec3 lit = vec3(1.25, 1.12, .98) * 1.6 * light + vec3(.35, .42, .55) * .55;
+            // silver lining when looking toward the sun
+            lit += vec3(1.4, 1.1, .8) * pow(sd, 6.) * (1. - dens) * 2.;
+            float fadeH = smoothstep(.0, .2, dir.y);
+            c = mix(c, lit, dens * fadeH * .95);
+          }
         }
         gl_FragColor = vec4(c, 1.);
       }`,
@@ -67,8 +70,6 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
     uTime: { value: 0 },
     uHeight: { value: heightTex },
     uBounds: { value: bounds },
-    uFogColor: { value: FOG_COLOR },
-    uFogDensity: { value: 0.00042 },
     uBathy: { value: 0 },
     uSince: { value: 99 },
     uQuakes: { value: 1 },
@@ -86,15 +87,30 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
     fragmentShader: /* glsl */ `
       precision highp float;
       ${NOISE}
-      ${SKY_FN}
+      ${NOISE_D}
+      ${ATMOS}
       uniform vec3 uSun; uniform float uTime; uniform sampler2D uHeight; uniform vec4 uBounds;
-      uniform vec3 uFogColor; uniform float uFogDensity; uniform float uBathy;
-      uniform float uSince, uQuakes;
+      uniform float uBathy, uSince, uQuakes;
       varying vec3 vPos;
-      float W(vec2 q, float t, float lod){
-        return vnoise(q * .18 + t * vec2(.16, .05)) * .5
-             + vnoise(q * .5 - t * vec2(.05, .22)) * .3 * lod
-             + vnoise(q * 1.4 + t * vec2(.4, .16)) * .2 * lod * lod;
+      // wind-driven sea: several directional swell trains plus derivative noise chop
+      vec2 waveGrad(vec2 q, float t, float lod){
+        vec2 g = vec2(0.);
+        const int N = 4;
+        vec2 dirs[4]; dirs[0] = normalize(vec2(1., .35)); dirs[1] = normalize(vec2(.8, -.6)); dirs[2] = normalize(vec2(1., .9)); dirs[3] = normalize(vec2(.3, 1.));
+        float amps[4]; amps[0] = .55; amps[1] = .32; amps[2] = .2; amps[3] = .12;
+        float freqs[4]; freqs[0] = .09; freqs[1] = .17; freqs[2] = .33; freqs[3] = .61;
+        for (int i = 0; i < N; i++){
+          float k = freqs[i];
+          float ph = dot(dirs[i], q) * k + t * sqrt(9.8 * k) * .9;
+          g += dirs[i] * cos(ph) * amps[i] * k * (i > 1 ? lod : 1.);
+        }
+        vec2 p = q * .7 + vec2(t * .25, t * .1);
+        float a = .35;
+        for (int i = 0; i < 3; i++){
+          g += noised(p).yz * a * lod;
+          p = ROT * p * 1.9; a *= .5;
+        }
+        return g;
       }
       void main(){
         vec2 q = vPos.xz;
@@ -107,43 +123,53 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
         float dist = length(V);
         V /= dist;
         float t = uTime;
-        float lod = 1. - smoothstep(250., 1200., dist);
-        float e = .5 + dist * .002;
-        float amp = 1.1 / (1. + dist * .004);
-        float wx = (W(q + vec2(e, 0.), t, lod) - W(q - vec2(e, 0.), t, lod)) / (2. * e);
-        float wz = (W(q + vec2(0., e), t, lod) - W(q - vec2(0., e), t, lod)) / (2. * e);
+        float lod = 1. - smoothstep(200., 1400., dist);
+        vec2 g = waveGrad(q, t, lod) * (1.4 / (1. + dist * .0016));
+
         // tsunami: a long, low wave front parallel to the trench, running out to sea and toward the coast
         float tsu = 0.;
-        float tsuSlope = 0.;
         if (uSince < 16. && uQuakes > 0.) {
           float side = sign(q.x - ${TSUNAMI_X.toFixed(2)});
           float dd = abs(q.x - ${TSUNAMI_X.toFixed(2)}) - 55. * uSince;
           float env = uQuakes * exp(-uSince / 9.) * smoothstep(0., .6, uSince);
           tsu = exp(-dd * dd / 160.) * env;
-          tsuSlope = -2. * dd / 160. * tsu * side;
+          g.x += -2. * dd / 160. * tsu * side * 1.6;
         }
-        vec3 n = normalize(vec3(-wx * amp - tsuSlope * 1.6, 1., -wz * amp));
-        float fres = .02 + .98 * pow(1. - max(dot(n, V), 0.), 5.);
+        vec3 n = normalize(vec3(-g.x, 1., -g.y));
+
+        // Fresnel reflection of the sky, GGX-like sun highlight (HDR, blooms), and deep-water color
+        float cosT = max(dot(n, V), 0.);
+        float F = .02 + .98 * pow(1. - cosT, 5.);
         vec3 R = reflect(-V, n);
         R.y = abs(R.y);
-        vec3 refl = skyColor(R, uSun);
-        vec3 body = mix(vec3(.08,.4,.42), vec3(.03,.13,.22), smoothstep(.2, 10., depth));
-        body = mix(body, vec3(.02,.09,.17), smoothstep(10., 40., depth));
-        vec3 col = mix(body, refl * vec3(.78, .84, .92), clamp(fres, 0., 1.) * .7);
-        float spec = pow(max(dot(R, uSun), 0.), 280.) * 3.5 + pow(max(dot(R, uSun), 0.), 28.) * .18;
-        col += vec3(1.,.86,.65) * spec;
-        // surf along the shore, sparse whitecaps offshore
+        vec3 refl = skyRadiance(R, uSun);
+        vec3 Hh = normalize(V + uSun);
+        float nh = max(dot(n, Hh), 0.);
+        float a2 = .0035;
+        float D = a2 / (3.1416 * pow(nh * nh * (a2 - 1.) + 1., 2.));
+        vec3 sunSpec = vec3(1., .85, .65) * min(D * .22 * F, 9.);
+        vec3 deepC = vec3(.004, .03, .06);
+        vec3 shallowC = vec3(.03, .2, .2);
+        vec3 body = mix(shallowC, deepC, smoothstep(.3, 12., depth));
+        // light passing through wave crests toward the viewer
+        float sss = pow(max(dot(V, -uSun), 0.), 3.) * max(g.x * .8 + .3, 0.) * .25;
+        body += vec3(.02, .14, .12) * sss;
+        body += vec3(.04, .05, .05) * max(dot(n, uSun), 0.) * .5;
+        vec3 col = mix(body, refl * .62, F) + sunSpec;
+
+        // surf on the beach and sparse whitecaps offshore
         float shore = 1. - smoothstep(0., 1.8, depth);
         float bands = smoothstep(.35, .75, vnoise(q * vec2(1.1, .6) + vec2(t * .8, 0.)) * .6 + vnoise(q * 3. + t) * .4);
-        float foam = shore * bands + smoothstep(.8, .88, W(q * 1.7, t * 1.3, 1.)) * .3 * (1. - smoothstep(150., 700., dist));
-        foam += tsu * smoothstep(.55, .75, vnoise(q * vec2(.5, 2.) + t)) * .8;
-        col = mix(col, vec3(.9,.94,.96), clamp(foam, 0., .9));
-        col += vec3(.12, .16, .2) * tsu;
-        float alpha = mix(.45, 1., smoothstep(.3, 7., depth));
+        float caps = smoothstep(.7, .9, vnoise(q * .55 + t * .3) * .6 + vnoise(q * 2.3 - t * .4) * .4) * .35 * lod;
+        float foam = clamp(shore * bands + caps + tsu * .6 * smoothstep(.5, .75, vnoise(q * vec2(.5, 2.) + t)), 0., .95);
+        col = mix(col, vec3(.85, .88, .9) * (max(dot(n, uSun), 0.) * 1.6 + .5), foam);
+        col += vec3(.08, .11, .14) * tsu;
+
+        float alpha = mix(.55, 1., smoothstep(.3, 7., depth));
         alpha = mix(alpha, .3, uBathy);
-        float fog = 1. - exp(-pow(dist * uFogDensity, 1.35));
-        col = mix(col, uFogColor, clamp(fog, 0., 1.));
-        alpha = mix(alpha, 1., fog);
+        col = aerial(col, vPos, cameraPosition, uSun);
+        float far = 1. - exp(-dist * .00036);
+        alpha = mix(alpha, 1., far);
         gl_FragColor = vec4(col, alpha);
       }`,
   });
