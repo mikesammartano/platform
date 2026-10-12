@@ -120,6 +120,17 @@ export const VOLCANOES: Volcano[] = (() => {
   return list;
 })();
 
+/**
+ * Meandering river valleys on the coastal plain and the lowlands east of the mountains
+ * (0 = none, 1 = channel). Used for both the carved relief and greener valley floors.
+ */
+export function riverMask(x: number, z: number) {
+  const lowland = smooth(COAST_X + 10, COAST_X + 30, x) * (1 - smooth(ARC_X - 60, ARC_X - 35, x)) + smooth(ARC_X + 330, ARC_X + 420, x);
+  if (lowland <= 0) return 0;
+  const d = Math.abs(fbm(x / 230 + 5.2, z / 85 + 1.7, 4) - 0.5);
+  return lowland * (1 - smooth(0.006, 0.04, d));
+}
+
 function landProfile(x: number, z: number) {
   // x is relative to the trench at this z.
   if (x < 0) {
@@ -141,7 +152,7 @@ function landProfile(x: number, z: number) {
   const crest = ridged(x / 140 + 3.1, z / 140 + 17);
   const carved = eroded(x / 75 + 9.3, z / 75 - 2.7);
   const relief = (1.6 + 0.9 * base) * (0.55 * crest + 1.05 * carved - 0.42) * ruggedMask;
-  const lowNoise = (fbm(x / 25, z / 25) - 0.5) * 1.4;
+  const lowNoise = (fbm(x / 25, z / 25) - 0.5) * 1.4 - 0.9 * riverMask(x, z);
   const h = base + relief - 1.2 * ruggedMask + lowNoise;
   // inland lowlands stay above sea level
   return x > COAST_X + 8 ? Math.max(h, 0.35 + 0.3 * smooth(COAST_X, COAST_X + 30, x)) : h;
@@ -169,8 +180,8 @@ export function heightAt(x: number, z: number) {
 }
 
 // ---------- Mesh ----------
-export const TERRAIN_NX = 640;
-export const TERRAIN_NZ = 280;
+export const TERRAIN_NX = 800;
+export const TERRAIN_NZ = 320;
 
 export type TerrainData = {
   mesh: THREE.Mesh;
@@ -269,6 +280,7 @@ function bakeLight(H: Float32Array, nx: number, nz: number, sun: { x: number; y:
 export type TerrainArrays = {
   pos: Float32Array;
   light: Float32Array;
+  wet: Float32Array;
   index: Uint32Array;
   profile: Float32Array;
   heights: Uint16Array;
@@ -311,6 +323,12 @@ export function computeTerrain(sun: { x: number; y: number; z: number }): Terrai
     }
   }
   const light = bakeLight(H, nx, nz, sun);
+  const wet = new Float32Array((nx + 1) * (nz + 1));
+  for (let j = 0; j <= nz; j++) {
+    const z = zAt(j);
+    const off = strikeOffset(z);
+    for (let i = 0; i <= nx; i++) wet[j * (nx + 1) + i] = riverMask(xAt(i) - off, z);
+  }
   // Height map for the ocean shader (water depth -> color, foam).
   const tw = 384;
   const th = 192;
@@ -323,14 +341,15 @@ export function computeTerrain(sun: { x: number; y: number; z: number }): Terrai
       heights[j * tw + i] = THREE.DataUtils.toHalfFloat(heightAt(x, z));
     }
   }
-  return { pos, light, index, profile, heights, tw, th, bounds };
+  return { pos, light, wet, index, profile, heights, tw, th, bounds };
 }
 
 export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays = computeTerrain(sunDir)): TerrainData {
-  const { pos, light, index, profile, heights, tw, th } = data;
+  const { pos, light, wet, index, profile, heights, tw, th } = data;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('aLight', new THREE.BufferAttribute(light, 2));
+  geo.setAttribute('aWet', new THREE.BufferAttribute(wet, 1));
   geo.setIndex(new THREE.BufferAttribute(index, 1));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -349,12 +368,13 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays = comput
       uCamPos: { value: new THREE.Vector3() },
       uVolc: { value: VOLCANOES.slice(0, 4).map((v) => new THREE.Vector3(v.x, v.z, v.r)) },
       uErupt: { value: 0 },
+      uTime: { value: 0 },
     },
     vertexShader: /* glsl */ `
-      attribute vec2 aLight;
-      varying vec3 vPos; varying vec3 vNormal; varying vec2 vLight;
+      attribute vec2 aLight; attribute float aWet;
+      varying vec3 vPos; varying vec3 vNormal; varying vec2 vLight; varying float vWet;
       void main(){
-        vPos = position; vNormal = normal; vLight = aLight;
+        vPos = position; vNormal = normal; vLight = aLight; vWet = aWet;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
       }`,
     fragmentShader: /* glsl */ `
@@ -363,8 +383,8 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays = comput
       ${NOISE_D}
       ${ATMOS}
       uniform vec3 uSun; uniform vec3 uSkySun; uniform vec3 uCamPos;
-      uniform float uBathy; uniform float uTopo; uniform vec3 uVolc[4]; uniform float uErupt;
-      varying vec3 vPos; varying vec3 vNormal; varying vec2 vLight;
+      uniform float uBathy; uniform float uTopo; uniform vec3 uVolc[4]; uniform float uErupt; uniform float uTime;
+      varying vec3 vPos; varying vec3 vNormal; varying vec2 vLight; varying float vWet;
       vec3 lin(vec3 c){ return c * c; }
       vec3 ramp5(float t, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e){
         t = clamp(t, 0., 1.) * 4.;
@@ -420,6 +440,8 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays = comput
         } else {
           float veg = smoothstep(.5, 2., h) * (1. - smoothstep(18., 36., h + nz * 14.));
           vec3 green = mix(meadow, forest, smoothstep(.4, .7, forestN) * .85);
+          // river valleys: green gallery forest on the banks
+          green = mix(green, forest * 1.15, smoothstep(.1, .55, vWet));
           alb = mix(mix(sand, wetSand, 1. - smoothstep(.0, .35, h)), green, veg);
           alb = mix(alb, dry, smoothstep(14., 32., h + nz * 12.) * (1. - veg * .5));
           alb = mix(alb, scree, smoothstep(.18, .32, slope) * smoothstep(4., 14., h));
@@ -437,6 +459,11 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays = comput
           alb = mix(alb, snow, snowK);
           detailK = mix(mix(.35, .9, cliff), .15, snowK);
           rough = mix(1., .55, snowK);
+          // river water in the channel
+          float river = smoothstep(.86, .97, vWet) * (1. - snowK);
+          alb = mix(alb, lin(vec3(.1, .17, .2)), river);
+          rough = mix(rough, .12, river);
+          detailK *= 1. - river;
         }
 
         // evidence overlays replace the albedo so colors stay readable under lighting
@@ -461,6 +488,9 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays = comput
         float sh = vLight.y;
         float ndl = max(dot(n, uSun), 0.);
         // wrap a little light around terminators for softer, more natural relief
+        // shadows of drifting clouds
+        float cloud = smoothstep(.52, .74, fbm5(q * .0016 + uTime * vec2(.0045, .0016)));
+        sh *= 1. - .62 * cloud;
         float diff = max((dot(n, uSun) + .12) / 1.12, 0.) * sh;
         vec3 sunCol = vec3(1., .86, .68) * 3.4;
         vec3 skyCol = vec3(.42, .58, .95) * .5;

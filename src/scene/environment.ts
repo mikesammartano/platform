@@ -181,6 +181,10 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
         float sss = pow(max(dot(V, -uSun), 0.), 3.) * max(g.x * .8 + .3, 0.) * .25;
         body += vec3(.02, .14, .12) * sss;
         body += vec3(.04, .05, .05) * max(dot(n, uSun), 0.) * .5;
+        // shadows of drifting clouds dim the glint and the water body (same pattern as on land)
+        float cloud = smoothstep(.52, .74, fbm5(q * .0016 + t * vec2(.0045, .0016)));
+        sunSpec *= 1. - .75 * cloud;
+        body *= 1. - .3 * cloud;
         vec3 col = mix(body, refl * .62, F) + sunSpec;
 
         // surf on the beach and sparse whitecaps offshore

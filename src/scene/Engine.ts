@@ -447,6 +447,7 @@ export class Engine {
     const cyc = cycleAt(t);
     const quakesOn = f('earthquakes');
     this.terrain.material.uniforms.uErupt.value = cyc.erupt * f('volcanoes');
+    this.terrain.material.uniforms.uTime.value = t;
     this.ocean.uniforms.uSince.value = cyc.since;
     this.ocean.uniforms.uQuakes.value = quakesOn;
 
