@@ -22,25 +22,23 @@ export async function exitPresentation() {
   }
 }
 
-function ToolsButton({ size = 30 }: { size?: number }) {
+function ToolsButton() {
   const setOpen = useApp((s) => s.setPanelOpen);
   return (
-    <button className="tools-btn lg" onClick={() => setOpen(true)} aria-label="Open Teacher Tools">
-      <Icon d={PATHS.open} size={size} />
-      Tools
+    <button className="icon-btn lg" onClick={() => setOpen(true)} aria-label="Open Teacher Tools" title="Teacher Tools">
+      <Icon d={PATHS.tools} size={30} sw={2} />
     </button>
   );
 }
 
 export function ClosedControls() {
   return (
-    <>
-      <button className="tools-btn lg present-btn" onClick={enterPresentation} aria-label="Present full screen">
-        <Icon d={PATHS.present} size={28} />
-        Present
+    <div className="top-actions">
+      <button className="icon-btn lg" onClick={enterPresentation} aria-label="Present full screen" title="Present">
+        <Icon d={PATHS.presentScreen} size={30} sw={2} />
       </button>
       <ToolsButton />
-    </>
+    </div>
   );
 }
 
@@ -48,10 +46,9 @@ export function ClosedControls() {
 export function PresentControls() {
   return (
     <div className="top-actions">
-      <ToolsButton size={24} />
-      <button className="exit-present lg" onClick={exitPresentation} aria-label="Exit presentation">
-        <Icon d={PATHS.exitPresent} size={24} />
-        Exit
+      <ToolsButton />
+      <button className="icon-btn lg" onClick={exitPresentation} aria-label="Exit presentation" title="Exit presentation">
+        <Icon d={PATHS.exitPresent} size={30} sw={2} />
       </button>
     </div>
   );

@@ -67,7 +67,7 @@ function drawItem(ctx: CanvasRenderingContext2D, { a, pts }: Projected, s: numbe
     ctx.stroke();
   } else if (a.kind === 'label' && a.text && pts[0]) {
     const p = pts[0];
-    ctx.font = `600 ${Math.round((24 + a.width * 1.4) * s)}px Geist, system-ui, sans-serif`;
+    ctx.font = `600 ${Math.round((24 + a.width * 1.4) * s)}px 'Inter Variable', system-ui, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.shadowBlur = 0;
     ctx.lineWidth = 6 * s;

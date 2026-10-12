@@ -33,6 +33,10 @@ export const PATHS = {
   open: 'M3.5 7a2.5 2.5 0 012.5-2.5h12A2.5 2.5 0 0120.5 7v10a2.5 2.5 0 01-2.5 2.5H6A2.5 2.5 0 013.5 17zM14.5 4.5v15M18.5 9.5L16 12l2.5 2.5',
   exitTeach: 'M10 4H5v16h5M15 8l4 4-4 4M19 12H9',
   exitPresent: 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5',
+  /** Teacher Tools: three sliders */
+  tools: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4a2 2 0 100 4 2 2 0 000-4zM9 10a2 2 0 100 4 2 2 0 000-4zM17 16a2 2 0 100 4 2 2 0 000-4z',
+  /** Present: a display with a play mark */
+  presentScreen: 'M3.5 5.5A1.5 1.5 0 015 4h14a1.5 1.5 0 011.5 1.5v10A1.5 1.5 0 0119 17H5a1.5 1.5 0 01-1.5-1.5zM12 17v3.5M8.5 20.5h7M10.5 8v6l5-3z',
   present: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   info: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 11v6M12 7.5v.01',
   teach: 'M12 2.5a9.5 9.5 0 100 19 9.5 9.5 0 000-19zM10 8.4v7.2l5.8-3.6z',
