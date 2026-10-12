@@ -204,6 +204,7 @@ export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
       uTopo: { value: 0 },
       uCamPos: { value: new THREE.Vector3() },
       uVolc: { value: VOLCANOES.slice(0, 4).map((v) => new THREE.Vector3(v.x, v.z, v.r)) },
+      uErupt: { value: 0 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vPos; varying vec3 vNormal;
@@ -215,7 +216,7 @@ export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
       precision highp float;
       ${NOISE}
       uniform vec3 uSun; uniform vec3 uFogColor; uniform float uFogDensity; uniform vec3 uCamPos;
-      uniform float uBathy; uniform float uTopo; uniform vec3 uVolc[4];
+      uniform float uBathy; uniform float uTopo; uniform vec3 uVolc[4]; uniform float uErupt;
       varying vec3 vPos; varying vec3 vNormal;
       vec3 ramp5(float t, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e){
         t = clamp(t, 0., 1.) * 4.;
@@ -282,6 +283,15 @@ export function buildTerrain(sunDir: THREE.Vector3): TerrainData {
         float fog = 1. - exp(-pow(dist * uFogDensity, 1.35));
         float hazeH = exp(-max(h, 0.) * .015);
         lit = mix(lit, uFogColor, clamp(fog * (.65 + .35 * hazeH), 0., 1.));
+        // lava on the upper flanks of the main volcano, brighter during eruption pulses
+        if (uErupt > 0.) {
+          vec2 dv = q - uVolc[0].xy;
+          float dn = length(dv) / uVolc[0].z;
+          float ang = atan(dv.y, dv.x);
+          float ch = smoothstep(.82, .97, sin(ang * 4. + fbm3(q * .25) * 3.));
+          float lava = ch * (1. - smoothstep(.12, .5 + .1 * uErupt, dn)) * smoothstep(.04, .12, dn);
+          lit = mix(lit, vec3(1., .42, .1) * (1.1 + .5 * vnoise(q * 1.5)), lava * (.35 + .6 * uErupt));
+        }
         gl_FragColor = vec4(lit, 1.);
       }`,
   });

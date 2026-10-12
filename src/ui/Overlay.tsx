@@ -192,7 +192,7 @@ export function Legends() {
           <svg width="56" height="16" viewBox="0 0 56 16" aria-hidden="true" style={{ flex: 'none' }}>
             <path d="M2 8h42M40 2l12 6-12 6z" stroke="#FFE08A" strokeWidth="4" fill="#FFE08A" strokeLinejoin="round" strokeLinecap="round" />
           </svg>
-          About 7 cm per year, relative to the continent
+          7 cm per year
         </div>
       </div>,
     );
@@ -217,7 +217,7 @@ export function Legends() {
       <div className="legend" key="temp">
         <div className="t">Temperature</div>
         <div className="bar" style={{ background: grad(['#29459E', '#3899CC', '#F2E6A8', '#F29E40', '#D14029', '#73122B']) }} />
-        <div className="ends"><span>Cold</span><span>About 1,500 °C</span></div>
+        <div className="ends"><span>Cold</span><span>Hot</span></div>
       </div>,
     );
   if (quakes && ev.earthquakeDepth)

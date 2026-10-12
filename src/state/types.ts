@@ -47,12 +47,15 @@ export type Tab = 'show' | 'evidence' | 'draw' | 'view';
 
 export type DrawTool = 'pen' | 'highlighter' | 'arrow' | 'circle' | 'label' | 'spotlight' | 'eraser';
 
-/** Annotation geometry is stored in normalized viewport coordinates (0..1) so it survives resizes. */
+/**
+ * Annotation geometry is stored as world points picked on the scene (the cut face, the landscape or the sea),
+ * so marks stay attached to the feature they point at when the view or focus changes.
+ */
 export type Annotation = {
   id: number;
   kind: 'pen' | 'highlighter' | 'arrow' | 'circle' | 'label';
   color: string;
   width: number;
-  points: [number, number][];
+  points: [number, number, number][];
   text?: string;
 };

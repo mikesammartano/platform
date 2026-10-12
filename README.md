@@ -13,6 +13,7 @@ Built from the Claude Design handoff in [`design/`](design/). The canonical artb
 npm install
 npm run dev        # http://localhost:5173
 npm test           # geometry, earthquake catalog and app-state tests
+npm run e2e        # Playwright: every teacher tool, end to end (needs a Chromium; WebGL via SwiftShader)
 npm run build      # static site in dist/ (relative paths, host anywhere)
 ```
 
@@ -26,7 +27,7 @@ included.
 | --- | --- |
 | **Show** | Surface, Plates, Mantle · Plate motion, Earthquakes, Magma, Volcanoes · Labels, Motion arrows · Geology ▸ Crust, Lithosphere, Asthenosphere |
 | **Evidence** | Earthquakes, Earthquake depth (floating legend), Plate motion (velocity arrows, ~7 cm/yr), Bathymetry, Topography, Temperature |
-| **Draw** | Pen, Highlighter, Arrow, Circle, Label, Spotlight, Eraser, Clear (tap twice), Undo/Redo, 5 colors, 3 widths |
+| **Draw** | Pen, Highlighter, Arrow, Circle, Label, Spotlight, Eraser, Clear (tap twice), Undo/Redo, 5 colors, 3 widths. Marks are pinned to the scene and follow every camera move. |
 | **View** | Surface / Combined / Cross-section, plus curated Focus moves: Ocean trench, Subduction zone, Earthquakes, Mantle wedge, Volcanic arc |
 | **Teach** | 7-step guided sequence (Start, Plates, Trench, Earthquakes, Magma, Volcanic arc, Complete system) with an "Ask students" prompt for each step |
 | **Footer** | Reset returns view, layers, evidence, playback and focus to the starting state. It does **not** erase drawings. Collapse hides the panel. |
@@ -52,6 +53,16 @@ constants (`glsl.ts`), so the picture and the tests cannot drift apart.
 - **Earthquakes** form a fixed catalog of ~330 events projected onto the section: interface thrusts near the trench,
   intraslab events to ~300 km, a weaker lower plane, outer-rise bending events and shallow crustal events. There are
   none in the hot mantle wedge. Each event flashes on its own cycle while playback runs.
+- **One playback loop is one earthquake cycle.** The shallow plate interface is locked and glows amber as strain
+  builds, while the forearc is slowly dragged down. At about 3/4 of the loop the locked patch slips: the rupture runs
+  along the fault, P and S waves spread through the rock, the forearc springs back up (elastic rebound), and a
+  trench-parallel tsunami runs out to sea and toward the coast. A burst of aftershocks follows. Teach step 4 jumps to
+  just before the rupture.
+- **Plates visibly move.** Evenly spaced age bands ride on the oceanic plate and carry it down into the mantle.
+  Sediment scraped off the plate builds an accretionary wedge at the trench.
+- **Magma comes in batches.** Each batch rises through the wedge and lithosphere to the crustal chamber. The chamber,
+  conduit, crater glow, flank lava and plume all pulse when a batch arrives.
+- **Mantle** (Show ▸ Mantle) adds slow flow trails: corner flow in the wedge, dragged down beside the slab.
 - **Temperature** is a qualitative thermal structure: a cold slab core pushes isotherms down, the mantle wedge is
   hot, and the forearc is cool.
 - **Scale.** Deep structure is drawn 1:1. Ocean depth is exaggerated 5×, and land relief about 12× so mountains read
@@ -77,7 +88,9 @@ src/
 - The UI is laid out at the 1920×1080 design size and scaled to the display, down to a 1366×768 Chromebook.
 - Performance:
   - Frames render only while something moves.
-  - Pixel ratio is capped at 1.5 and drops automatically if frames are slow.
+  - A pixel budget (about 1080p × 1.4) sets the render resolution, so 4K boards and Chromebooks keep their frame
+    rate. Resolution drops further automatically if frames are slow.
+  - If the GPU context is lost (the board sleeps, or the driver resets), the page recovers by reloading.
   - Layers fade with shader uniforms, so no geometry is rebuilt.
   - Float data uses half-float textures, which filter on every WebGL 2 device.
 - Accessibility:
@@ -89,8 +102,6 @@ src/
 
 ## Known limits and next steps
 
-- Drawings sit in screen space. If the teacher changes View or Focus afterwards, the marks stay where they were drawn
-  and don't follow the scene.
 - The Present button in the closed state isn't in the canonical artboards. Presentation mode needs a way in, and this
   is the least intrusive one.
 - The scene is procedural, not photographic. Swapping in authored textures (rock, vegetation, normal maps) is the next

@@ -4,7 +4,7 @@ import { INITIAL_EVIDENCE, INITIAL_LAYERS, useApp } from './store';
 import type { Annotation } from './types';
 
 const initial = useApp.getState();
-const mark = (id: number): Annotation => ({ id, kind: 'pen', color: '#F2C94C', width: 7, points: [[0.1, 0.1]] });
+const mark = (id: number): Annotation => ({ id, kind: 'pen', color: '#F2C94C', width: 7, points: [[0.1, 0.1, 0]] });
 
 describe('app state', () => {
   beforeEach(() => useApp.setState(initial, true));

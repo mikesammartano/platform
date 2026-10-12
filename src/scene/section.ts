@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { NOISE, SLAB_GLSL } from './glsl';
-import { SECTION_BOTTOM, X_MAX, X_MIN } from './model';
+import { HYPOCENTER, LOCKED, PRISM, SECTION_BOTTOM, TSUNAMI_X, X_MAX, X_MIN, slabCoords } from './model';
 import { TERRAIN_NX } from './terrain';
 
 export type SectionUniforms = {
@@ -15,6 +15,11 @@ export type SectionUniforms = {
   uLith: { value: number };
   uAsth: { value: number };
   uTemp: { value: number };
+  uStrain: { value: number };
+  uSince: { value: number };
+  uDeform: { value: number };
+  uErupt: { value: number };
+  uQuakes: { value: number };
 };
 
 /**
@@ -52,6 +57,11 @@ export function buildSection(profile: Float32Array) {
     uLith: { value: 0 },
     uAsth: { value: 0 },
     uTemp: { value: 0 },
+    uStrain: { value: 0 },
+    uSince: { value: 99 },
+    uDeform: { value: 0 },
+    uErupt: { value: 0.5 },
+    uQuakes: { value: 1 },
   };
 
   const material = new THREE.ShaderMaterial({
@@ -67,8 +77,14 @@ export function buildSection(profile: Float32Array) {
       ${SLAB_GLSL}
       uniform sampler2D uProfile;
       uniform float uAdvect, uTime, uSurface, uPlates, uMantle, uMagma, uCrust, uLith, uAsth, uTemp;
+      uniform float uStrain, uSince, uDeform, uErupt, uQuakes;
       varying vec2 vXY;
       const float NX = ${TERRAIN_NX.toFixed(1)};
+      const float TSUNAMI_X = ${TSUNAMI_X.toFixed(2)};
+      const float LOCK_S0 = ${LOCKED.s0.toFixed(2)}, LOCK_S1 = ${LOCKED.s1.toFixed(2)};
+      const vec2 HYPO = vec2(${HYPOCENTER.x.toFixed(3)}, ${HYPOCENTER.y.toFixed(3)});
+      const float HYPO_S = ${slabCoords(HYPOCENTER.x, HYPOCENTER.y).s.toFixed(3)};
+      const float PRISM_X1 = ${PRISM.x1.toFixed(2)}, PRISM_DIP = ${PRISM.dip.toFixed(3)};
       float profileAt(float x){
         float u = (x - (${X_MIN.toFixed(1)})) / ${w.toFixed(1)};
         u = u * (NX / (NX + 1.)) + .5 / (NX + 1.);
@@ -85,24 +101,42 @@ export function buildSection(profile: Float32Array) {
       }
       float line(float d, float aa, float w){ return 1. - smoothstep(w, w + aa * 1.5, abs(d)); }
 
+      // tsunami: a trench-parallel wave that spreads both ways from above the rupture
+      float tsunamiAt(float x){
+        if (uSince > 16.) return 0.;
+        float d = abs(x - TSUNAMI_X) - 55. * uSince;
+        return uQuakes * 2.6 * exp(-d * d / 160.) * exp(-uSince / 9.) * smoothstep(0., .6, uSince);
+      }
+
       void main(){
-        vec2 p = vXY; float x = p.x, y = p.y;
-        float aa = max(fwidth(y), 1e-3);
+        vec2 p = vXY;
+        float yo = p.y;
+        float aa = max(fwidth(yo), 1e-3);
+
+        // elastic rebound: rock above the locked fault is dragged down, then springs back in the earthquake
+        vec2 sn0 = slabSN(p);
+        if (sn0.y < 0. && p.x > 0. && p.x < 260.) {
+          float bell = exp(-pow((p.x - 48.) / 42., 2.));
+          p.y -= uDeform * 5. * bell * smoothstep(0., 5., -sn0.y);
+        }
+        float x = p.x, y = p.y;
         float top = profileAt(x);
-        float sea = 0.;
-        float surf = max(top, sea);
-        if (y > surf + aa) discard;
-        float edgeA = 1. - smoothstep(surf - aa, surf + aa * .5, y);
+        float eta = tsunamiAt(x);
+        float surf = max(top, eta);
+        if (y > top && yo > surf + aa) discard;
 
         // ---------- water column ----------
         if (y > top) {
           if (uSurface < .5) discard;
-          float d = clamp(-y / 40., 0., 1.);
+          float edgeW = 1. - smoothstep(eta - aa, eta + aa * .5, yo);
+          float d = clamp(-yo / 40., 0., 1.);
           vec3 wc = mix(vec3(.12,.33,.48), vec3(.03,.1,.19), pow(d, .7));
-          wc += .025 * vnoise(vec2(x * .15 + uTime * .2, y * .3));
-          gl_FragColor = vec4(wc, edgeA);
+          wc += .025 * vnoise(vec2(x * .15 + uTime * .2, yo * .3));
+          wc = mix(wc, vec3(.55,.75,.85), smoothstep(.2, 2., eta) * smoothstep(-6., 0., yo) * .6);
+          gl_FragColor = vec4(wc, edgeW);
           return;
         }
+        float edgeA = 1. - smoothstep(top - aa, top + aa * .5, y);
 
         vec2 sn = slabSN(p);
         float s = sn.x, n = sn.y;
@@ -110,42 +144,51 @@ export function buildSection(profile: Float32Array) {
         float depthK = clamp(-y / 330., 0., 1.);
 
         // ---------- materials ----------
-        vec3 mantleBase = mix(vec3(.15,.13,.12), vec3(.2,.14,.11), depthK);
-        float mm = fbm3(p * .045 + vec2(0., uTime * .002));
+        vec3 mantleBase = mix(vec3(.15,.13,.12), vec3(.21,.14,.11), depthK);
+        float mm = fbm3(p * .045);
         float mm2 = vnoise(p * .35);
-        vec3 mantle = mantleBase * (.82 + .32 * mm) * (.93 + .1 * mm2);
-        // Mantle layer: reveal solid-rock texture and slow flow banding
-        float flowBands = vnoise(vec2(dot(p, vec2(.06, .035)) - uTime * .03, dot(p, vec2(-.035, .06)) * .4));
-        vec3 mantleOn = mantleBase * 1.18 * (.75 + .5 * mm) + vec3(.03, .015, .0) * flowBands;
+        vec3 mantle = mantleBase * (.84 + .28 * mm) * (.95 + .08 * mm2);
+        vec3 mantleOn = mantleBase * 1.2 * (.78 + .44 * mm);
         mantle = mix(mantle, mantleOn, uMantle);
         vec3 wedge = mantle * vec3(1.08, 1.02, .98);
 
-        // plate-local texture coordinates move with the plate
-        vec2 pc = vec2(s - uAdvect, n);
+        // plate-local texture coordinates travel with the plate
+        float sa = s - uAdvect;
+        vec2 pc = vec2(sa, n);
         float pn = fbm3(pc * vec2(.05, .12));
         float pn2 = vnoise(pc * vec2(.5, 1.1));
-        // oceanic crust: sediment veneer, pillow basalt, dikes, gabbro
-        vec3 sed = vec3(.42,.37,.3) * (.85 + .3 * pn2);
-        vec3 basalt = vec3(.19,.2,.23) * (.8 + .35 * pn) * (.9 + .2 * step(.55, vnoise(pc * vec2(.9, 1.6))));
-        vec3 gabbro = vec3(.27,.27,.27) * (.85 + .25 * pn);
-        vec3 ocrust = mix(basalt, gabbro, smoothstep(OCRUST * .45, OCRUST * .7, n));
-        ocrust = mix(sed, ocrust, smoothstep(.6, 1.4, n));
-        vec3 olm = vec3(.29,.29,.3) * (.78 + .32 * pn) * (.95 + .08 * sin(n * .9 + pn * 3.));
+        // oceanic crust: sediment veneer, pillow basalt, sheeted dikes, gabbro
+        vec3 sed = vec3(.45,.39,.3) * (.88 + .24 * pn2);
+        float pillows = smoothstep(.5, .62, vnoise(pc * vec2(.9, 1.6)));
+        vec3 basalt = vec3(.2,.21,.24) * (.82 + .3 * pn) * (.92 + .16 * pillows);
+        float dikes = .5 + .5 * sin(sa * 2.2 + pn * 4.);
+        vec3 gabbro = vec3(.28,.28,.28) * (.86 + .2 * pn) * (.96 + .06 * dikes * (1. - smoothstep(OCRUST * .5, OCRUST * .7, n)));
+        vec3 ocrust = mix(basalt, gabbro, smoothstep(OCRUST * .4, OCRUST * .7, n));
+        ocrust = mix(sed, ocrust, smoothstep(.7, 1.6, n));
+        vec3 olm = vec3(.3,.3,.31) * (.82 + .26 * pn);
         vec3 plate = mix(ocrust, olm, smoothstep(OCRUST - aa, OCRUST + aa, n));
-        // rounded shading across the plate thickness gives the slab volume
         plate *= mix(1.14, .8, smoothstep(0., SLAB_H, n));
-        // slab is warmed slowly as it sinks (stays solid)
         plate = mix(plate, plate * vec3(1.15, .98, .9), smoothstep(150., 450., s) * .6);
+        // age bands: evenly spaced marks that ride with the plate, so its motion is easy to follow
+        float band = line(fract(sa / 55.) - .5, aa / 55., .006);
+        plate = mix(plate, plate * 1.32 + .02, band * .8 * smoothstep(-700., -300., s) * (1. - smoothstep(380., 470., s)));
 
-        // continental crust: folded strata, granite plutons under the arc
+        // continental crust: gently folded strata, granite plutons under the arc
         float warp = fbm3(p * vec2(.03, .06)) * 14.;
-        float strata = sin((y + warp) * .9) * .5 + .5;
-        vec3 ucrust = mix(vec3(.44,.36,.28), vec3(.35,.29,.23), strata) * (.85 + .25 * mm2);
-        vec3 lcrust = mix(vec3(.3,.27,.25), vec3(.25,.23,.22), strata) * (.85 + .2 * mm2);
+        float strata = sin((y + warp) * .7) * .5 + .5;
+        vec3 ucrust = mix(vec3(.43,.35,.27), vec3(.37,.3,.24), strata) * (.9 + .16 * mm2);
+        vec3 lcrust = mix(vec3(.3,.27,.25), vec3(.27,.24,.22), strata) * (.9 + .14 * mm2);
         vec3 ccrust = mix(lcrust, ucrust, smoothstep(moho * .45 - 4., moho * .45 + 4., y));
         float pluton = smoothstep(.6, .66, fbm3(p * vec2(.035, .05) + 3.)) * (1. - smoothstep(50., 110., abs(x - ARC_X - 20.)));
-        ccrust = mix(ccrust, vec3(.47,.42,.38) * (.92 + .1 * mm2), pluton * .35 * smoothstep(moho + 6., moho + 20., y) * (1. - smoothstep(-14., -4., y)));
-        vec3 clm = vec3(.24,.22,.19) * (.82 + .3 * mm);
+        ccrust = mix(ccrust, vec3(.47,.42,.38) * (.92 + .1 * mm2), pluton * .3 * smoothstep(moho + 6., moho + 20., y) * (1. - smoothstep(-14., -4., y)));
+        // accretionary wedge: sediment scraped off the plate, stacked along landward-dipping thrusts
+        float inPrism = smoothstep(.5, -.5, x - (PRISM_X1 + PRISM_DIP * (y + 15.)));
+        float tw = fbm3(p * .08) * 6.;
+        float thrusts = line(fract((x + y * 1.35 + tw) / 13.) - .5, aa / 13. * 1.7, .01);
+        vec3 prism = mix(vec3(.47,.41,.32), vec3(.4,.35,.28), .5 + .5 * sin(y * 1.4 + x * .3)) * (.9 + .15 * pn2);
+        prism *= 1. - .16 * thrusts;
+        ccrust = mix(ccrust, prism, inPrism * step(0., x));
+        vec3 clm = vec3(.24,.22,.19) * (.84 + .26 * mm);
 
         // "Plates" off: lithosphere fades toward mantle so plates are not distinguished
         float pl = .25 + .75 * uPlates;
@@ -156,7 +199,7 @@ export function buildSection(profile: Float32Array) {
         // ---------- regions ----------
         vec3 overriding;
         if (x < 0.) {
-          overriding = sed; // sediment draped on the incoming plate
+          overriding = sed;
         } else {
           overriding = mix(wedge, clm, smoothstep(lab - aa, lab + aa, y));
           overriding = mix(overriding, ccrust, smoothstep(moho - aa, moho + aa, y));
@@ -164,23 +207,28 @@ export function buildSection(profile: Float32Array) {
         vec3 col = mix(overriding, plate, smoothstep(-aa, aa, n));
         col = mix(col, mantle, smoothstep(SLAB_H - aa, SLAB_H + aa, n));
 
-        // fault / plate interface highlight (subduction zone)
+        // plate interface (the fault between the plates)
         float iface = line(n, aa, .35) * step(-20., s) * (1. - smoothstep(380., 480., s));
-        col = mix(col, vec3(.86,.83,.76), iface * .55 * uPlates);
-        // lithosphere base: faint edge so plates read as rigid slabs
+        col = mix(col, vec3(.86,.83,.76), iface * .5 * uPlates);
         col *= 1. - .25 * line(n - SLAB_H, aa, .6) * uPlates;
 
-        // ---------- geology overlays ----------
-        bool aboveSlab = n < 0. && x >= 0.;
-        float isAsth = (n > SLAB_H || (aboveSlab && y < lab)) ? 1. : 0.;
-        col = mix(col, col * vec3(1.35, 1.12, .9) + vec3(.06, .03, .0), uAsth * isAsth * .8);
-        float crustMask = (n >= 0. && n < OCRUST && s > -1e4) || (aboveSlab && y > moho) ? 1. : 0.;
-        col = mix(col, col * vec3(1.22, 1.12, 1.) + .03, uCrust * crustMask * .7);
-        float dash = step(.5, fract(x * .06));
-        float mohoL = aboveSlab ? line(y - moho, aa, .5) : line(n - OCRUST, aa, .4) * step(n, OCRUST + 3.);
-        col = mix(col, vec3(.95,.86,.62), uCrust * mohoL * .9);
-        float labL = aboveSlab ? line(y - lab, aa, .6) : line(n - SLAB_H, aa, .6);
-        col = mix(col, vec3(.95), uLith * labL * dash * .9);
+        // ---------- earthquake cycle on the plate interface ----------
+        if (uQuakes > 0.) {
+          float onFault = (1. - smoothstep(1.8, 5., abs(n + .6))) * smoothstep(LOCK_S0 - 6., LOCK_S0 + 6., s) * (1. - smoothstep(LOCK_S1 - 12., LOCK_S1 + 6., s));
+          // locked patch: strain builds (amber glow grows)
+          float build = pow(uStrain, 1.6) * (.75 + .25 * sin(uTime * 7. + s * .3));
+          col = mix(col, vec3(1., .74, .28), onFault * build * .9 * uQuakes);
+          // rupture runs both ways along the fault from the hypocenter
+          float front = 160. * uSince;
+          float rup = onFault * step(abs(s - HYPO_S), front) * exp(-uSince * 1.6);
+          col = mix(col, vec3(1., .95, .8), clamp(rup, 0., 1.) * uQuakes);
+          // seismic waves: P then S
+          float r = length(p - HYPO);
+          float wP = line(r - 230. * uSince, aa, .9 + uSince * .6) * exp(-uSince / 1.4);
+          float wS = line(r - 130. * uSince, aa, 1.2 + uSince * .9) * exp(-uSince / 1.8);
+          float waves = (wP * .45 + wS * .6) * step(uSince, 5.) * uQuakes;
+          col = mix(col, vec3(1., .93, .78), waves);
+        }
 
         // ---------- magma ----------
         if (uMagma > 0.) {
@@ -199,13 +247,13 @@ export function buildSection(profile: Float32Array) {
           float ce = dot(cq, cq);
           float cham = 1. - smoothstep(.55, 1., ce + .25 * (vnoise(p * .4) - .5));
           vec3 mush = mix(vec3(.6,.2,.08), vec3(.95,.45,.12), smoothstep(.8, .1, ce));
-          col = mix(col, mush * (.75 + .35 * vnoise(p * .9 + uTime * .1)), cham * .85 * uMagma);
+          col = mix(col, mush * (.6 + .3 * vnoise(p * .9 + uTime * .1) + .35 * uErupt), cham * .85 * uMagma);
           // short upper-crust conduit to the volcano
           float wig = sin(y * .35) * .9 + sin(y * .9) * .3;
           float cond = 1. - smoothstep(.9, 2.2, abs(x - VOLC_X - wig));
           cond *= smoothstep(CHAMBER.y + CHAMBER.w * .4, CHAMBER.y + CHAMBER.w + 3., y);
           vec3 condCol = mix(vec3(.75,.22,.06), vec3(1.,.55,.15), smoothstep(CHAMBER.y, 8., y));
-          col = mix(col, condCol, cond * .9 * uMagma);
+          col = mix(col, condCol * (.7 + .45 * uErupt), cond * (.55 + .45 * uErupt) * uMagma);
         }
 
         // ---------- temperature evidence ----------

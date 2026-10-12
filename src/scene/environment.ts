@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NOISE } from './glsl';
+import { TSUNAMI_X } from './model';
 
 export const SUN_DIR = new THREE.Vector3(-0.78, 0.11, -0.62).normalize();
 export const FOG_COLOR = new THREE.Color(0.6, 0.69, 0.79);
@@ -69,6 +70,8 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
     uFogColor: { value: FOG_COLOR },
     uFogDensity: { value: 0.00042 },
     uBathy: { value: 0 },
+    uSince: { value: 99 },
+    uQuakes: { value: 1 },
   };
   const geo = new THREE.PlaneGeometry(10000, 9000, 1, 1);
   geo.rotateX(-Math.PI / 2);
@@ -86,6 +89,7 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
       ${SKY_FN}
       uniform vec3 uSun; uniform float uTime; uniform sampler2D uHeight; uniform vec4 uBounds;
       uniform vec3 uFogColor; uniform float uFogDensity; uniform float uBathy;
+      uniform float uSince, uQuakes;
       varying vec3 vPos;
       float W(vec2 q, float t, float lod){
         return vnoise(q * .18 + t * vec2(.16, .05)) * .5
@@ -108,7 +112,17 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
         float amp = 1.1 / (1. + dist * .004);
         float wx = (W(q + vec2(e, 0.), t, lod) - W(q - vec2(e, 0.), t, lod)) / (2. * e);
         float wz = (W(q + vec2(0., e), t, lod) - W(q - vec2(0., e), t, lod)) / (2. * e);
-        vec3 n = normalize(vec3(-wx * amp, 1., -wz * amp));
+        // tsunami: a long, low wave front parallel to the trench, running out to sea and toward the coast
+        float tsu = 0.;
+        float tsuSlope = 0.;
+        if (uSince < 16. && uQuakes > 0.) {
+          float side = sign(q.x - ${TSUNAMI_X.toFixed(2)});
+          float dd = abs(q.x - ${TSUNAMI_X.toFixed(2)}) - 55. * uSince;
+          float env = uQuakes * exp(-uSince / 9.) * smoothstep(0., .6, uSince);
+          tsu = exp(-dd * dd / 160.) * env;
+          tsuSlope = -2. * dd / 160. * tsu * side;
+        }
+        vec3 n = normalize(vec3(-wx * amp - tsuSlope * 1.6, 1., -wz * amp));
         float fres = .02 + .98 * pow(1. - max(dot(n, V), 0.), 5.);
         vec3 R = reflect(-V, n);
         R.y = abs(R.y);
@@ -122,7 +136,9 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
         float shore = 1. - smoothstep(0., 1.8, depth);
         float bands = smoothstep(.35, .75, vnoise(q * vec2(1.1, .6) + vec2(t * .8, 0.)) * .6 + vnoise(q * 3. + t) * .4);
         float foam = shore * bands + smoothstep(.8, .88, W(q * 1.7, t * 1.3, 1.)) * .3 * (1. - smoothstep(150., 700., dist));
+        foam += tsu * smoothstep(.55, .75, vnoise(q * vec2(.5, 2.) + t)) * .8;
         col = mix(col, vec3(.9,.94,.96), clamp(foam, 0., .9));
+        col += vec3(.12, .16, .2) * tsu;
         float alpha = mix(.45, 1., smoothstep(.3, 7., depth));
         alpha = mix(alpha, .3, uBathy);
         float fog = 1. - exp(-pow(dist * uFogDensity, 1.35));

@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useApp } from '../state/store';
 import type { Annotation } from '../state/types';
+import { EngineCtx } from './context';
 
 type Pt = [number, number];
+type W3 = [number, number, number];
 let nextId = 1;
 
-function drawItem(ctx: CanvasRenderingContext2D, a: Annotation, W: number, H: number, s: number) {
-  const px = (p: Pt): Pt => [p[0] * W, p[1] * H];
+/** Screen-space copy of an annotation for drawing and hit testing. Null points are behind the camera. */
+type Projected = { a: Annotation; pts: (Pt | null)[] };
+
+function drawItem(ctx: CanvasRenderingContext2D, { a, pts }: Projected, s: number) {
+  if (!pts.some(Boolean)) return;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -22,19 +27,25 @@ function drawItem(ctx: CanvasRenderingContext2D, a: Annotation, W: number, H: nu
       ctx.lineWidth = w * 3.4;
       ctx.shadowBlur = 0;
     } else ctx.lineWidth = w;
-    const pts = a.points.map(px);
     ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.01, pts[0][1]);
-    for (let i = 1; i < pts.length - 1; i++) {
-      const mx = (pts[i][0] + pts[i + 1][0]) / 2;
-      const my = (pts[i][1] + pts[i + 1][1]) / 2;
-      ctx.quadraticCurveTo(pts[i][0], pts[i][1], mx, my);
+    let open = false;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (!p) {
+        open = false;
+        continue;
+      }
+      const nxt = pts[i + 1];
+      if (!open) {
+        ctx.moveTo(p[0], p[1]);
+        if (!nxt) ctx.lineTo(p[0] + 0.01, p[1]);
+        open = true;
+      } else if (nxt) ctx.quadraticCurveTo(p[0], p[1], (p[0] + nxt[0]) / 2, (p[1] + nxt[1]) / 2);
+      else ctx.lineTo(p[0], p[1]);
     }
-    if (pts.length > 1) ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
     ctx.stroke();
-  } else if (a.kind === 'arrow') {
-    const [p0, p1] = a.points.map(px);
+  } else if (a.kind === 'arrow' && pts[0] && pts[1]) {
+    const [p0, p1] = [pts[0], pts[1]];
     const ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
     const head = 14 * s + w * 2.4;
     ctx.lineWidth = w;
@@ -48,14 +59,14 @@ function drawItem(ctx: CanvasRenderingContext2D, a: Annotation, W: number, H: nu
     ctx.lineTo(p1[0] - Math.cos(ang + 0.45) * head, p1[1] - Math.sin(ang + 0.45) * head);
     ctx.closePath();
     ctx.fill();
-  } else if (a.kind === 'circle') {
-    const [p0, p1] = a.points.map(px);
+  } else if (a.kind === 'circle' && pts[0] && pts[1]) {
+    const [p0, p1] = [pts[0], pts[1]];
     ctx.lineWidth = w;
     ctx.beginPath();
     ctx.ellipse((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, Math.abs(p1[0] - p0[0]) / 2, Math.abs(p1[1] - p0[1]) / 2, 0, 0, Math.PI * 2);
     ctx.stroke();
-  } else if (a.kind === 'label' && a.text) {
-    const [p] = a.points.map(px);
+  } else if (a.kind === 'label' && a.text && pts[0]) {
+    const p = pts[0];
     ctx.font = `600 ${Math.round((24 + a.width * 1.4) * s)}px Geist, system-ui, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.shadowBlur = 0;
@@ -75,11 +86,10 @@ const segDist = (p: Pt, a: Pt, b: Pt) => {
   return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
 };
 
-function hit(a: Annotation, p: Pt, W: number, H: number, r: number) {
-  const px = (q: Pt): Pt => [q[0] * W, q[1] * H];
-  const P = px(p);
+function hit({ a, pts }: Projected, P: Pt, r: number) {
   if (a.kind === 'circle') {
-    const [p0, p1] = a.points.map(px);
+    if (!pts[0] || !pts[1]) return false;
+    const [p0, p1] = [pts[0], pts[1]];
     const cx = (p0[0] + p1[0]) / 2;
     const cy = (p0[1] + p1[1]) / 2;
     const rx = Math.abs(p1[0] - p0[0]) / 2;
@@ -92,17 +102,22 @@ function hit(a: Annotation, p: Pt, W: number, H: number, r: number) {
     return false;
   }
   if (a.kind === 'label') {
-    const q = px(a.points[0]);
+    const q = pts[0];
+    if (!q) return false;
     const w = (a.text?.length ?? 1) * (14 + a.width) * (r / 22);
     return P[0] > q[0] - r && P[0] < q[0] + w + r && Math.abs(P[1] - q[1]) < r * 1.4;
   }
-  const pts = a.points.map(px);
-  if (pts.length === 1) return Math.hypot(P[0] - pts[0][0], P[1] - pts[0][1]) < r;
-  for (let i = 0; i < pts.length - 1; i++) if (segDist(P, pts[i], pts[i + 1]) < r + a.width) return true;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (!p) continue;
+    const q = pts[i + 1];
+    if (q ? segDist(P, p, q) < r + a.width : Math.hypot(P[0] - p[0], P[1] - p[1]) < r) return true;
+  }
   return false;
 }
 
 export function Ink({ uiScale, panelInset }: { uiScale: number; panelInset: number }) {
+  const engine = useContext(EngineCtx);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const annotations = useApp((s) => s.annotations);
   const draw = useApp((s) => s.draw);
@@ -111,9 +126,15 @@ export function Ink({ uiScale, panelInset }: { uiScale: number; panelInset: numb
   const live = useRef<Annotation | null>(null);
   const erasing = useRef<Set<number> | null>(null);
   const pointer = useRef<number | null>(null);
+  const lastScreen = useRef<Pt>([0, 0]);
   const [spot, setSpot] = useState<Pt | null>(null);
-  const [editing, setEditing] = useState<{ p: Pt; text: string } | null>(null);
+  const [editing, setEditing] = useState<{ w: W3; text: string } | null>(null);
   const size = useRef({ W: 1, H: 1, dpr: 1 });
+
+  const projectAll = useCallback(
+    (list: Annotation[]): Projected[] => (engine ? list.map((a) => ({ a, pts: a.points.map((p) => engine.project(p)) })) : []),
+    [engine],
+  );
 
   const redraw = useCallback(() => {
     const c = canvasRef.current;
@@ -123,9 +144,10 @@ export function Ink({ uiScale, panelInset }: { uiScale: number; panelInset: numb
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     const hidden = erasing.current;
-    for (const a of useApp.getState().annotations) if (!hidden?.has(a.id)) drawItem(ctx, a, W, H, uiScale);
-    if (live.current) drawItem(ctx, live.current, W, H, uiScale);
-  }, [uiScale]);
+    const list = useApp.getState().annotations.filter((a) => !hidden?.has(a.id));
+    if (live.current) list.push(live.current);
+    for (const p of projectAll(list)) drawItem(ctx, p, uiScale);
+  }, [uiScale, projectAll]);
 
   useEffect(() => {
     const onResize = () => {
@@ -142,60 +164,69 @@ export function Ink({ uiScale, panelInset }: { uiScale: number; panelInset: numb
     return () => window.removeEventListener('resize', onResize);
   }, [redraw]);
 
+  // marks are attached to the scene, so they follow every camera move
+  useEffect(() => engine?.onCamera(redraw), [engine, redraw]);
   useEffect(redraw, [annotations, redraw]);
 
   const tool = draw.tool;
   const spotOn = active && tool === 'spotlight';
   useEffect(() => {
-    if (spotOn && !spot) setSpot([(window.innerWidth - panelInset) / 2, window.innerHeight / 2]);
-    if (!spotOn) setSpot(null);
-  }, [spotOn]);
+    if (spotOn) setSpot((cur) => cur ?? [(window.innerWidth - panelInset) / 2, window.innerHeight / 2]);
+    else setSpot(null);
+  }, [spotOn, panelInset]);
 
-  const norm = (e: React.PointerEvent): Pt => [e.clientX / size.current.W, e.clientY / size.current.H];
+  const pick = (e: React.PointerEvent): W3 => (engine ? engine.pick(e.clientX, e.clientY) : [0, 0, 0]);
 
   const finishLabel = (save: boolean) => {
     if (editing && save && editing.text.trim()) {
-      commit([...useApp.getState().annotations, { id: nextId++, kind: 'label', color: draw.color, width: draw.width, points: [editing.p], text: editing.text.trim() }]);
+      commit([...useApp.getState().annotations, { id: nextId++, kind: 'label', color: draw.color, width: draw.width, points: [editing.w], text: editing.text.trim() }]);
     }
     setEditing(null);
   };
 
+  const eraseAt = (P: Pt) => {
+    for (const p of projectAll(useApp.getState().annotations)) if (hit(p, P, 22 * uiScale)) erasing.current!.add(p.a.id);
+  };
+
   const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!active || pointer.current !== null) return;
+    if (!active || pointer.current !== null || !engine) return;
     if (editing) {
       finishLabel(true);
       return;
     }
     pointer.current = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
-    const p = norm(e);
+    lastScreen.current = [e.clientX, e.clientY];
     if (tool === 'spotlight') setSpot([e.clientX, e.clientY]);
-    else if (tool === 'label') setEditing({ p, text: '' });
+    else if (tool === 'label') {
+      // keep the browser's default focus change from immediately blurring the new text box
+      e.preventDefault();
+      setEditing({ w: pick(e), text: '' });
+    }
     else if (tool === 'eraser') {
       erasing.current = new Set();
-      eraseAt(p);
-    } else live.current = { id: nextId++, kind: tool, color: draw.color, width: draw.width, points: tool === 'pen' || tool === 'highlighter' ? [p] : [p, p] };
+      eraseAt([e.clientX, e.clientY]);
+    } else {
+      const w = pick(e);
+      live.current = { id: nextId++, kind: tool, color: draw.color, width: draw.width, points: tool === 'pen' || tool === 'highlighter' ? [w] : [w, w] };
+    }
     redraw();
-  };
-
-  const eraseAt = (p: Pt) => {
-    const { W, H } = size.current;
-    for (const a of useApp.getState().annotations) if (hit(a, p, W, H, 22 * uiScale)) erasing.current!.add(a.id);
   };
 
   const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (spotOn) setSpot([e.clientX, e.clientY]);
     if (e.pointerId !== pointer.current) return;
-    const p = norm(e);
     const l = live.current;
     if (l) {
       if (l.kind === 'pen' || l.kind === 'highlighter') {
-        const last = l.points[l.points.length - 1];
-        if (Math.hypot((p[0] - last[0]) * size.current.W, (p[1] - last[1]) * size.current.H) > 2) l.points.push(p);
-      } else l.points[1] = p;
+        const [lx, ly] = lastScreen.current;
+        if (Math.hypot(e.clientX - lx, e.clientY - ly) < 3) return;
+        l.points.push(pick(e));
+      } else l.points[1] = pick(e);
+      lastScreen.current = [e.clientX, e.clientY];
       redraw();
     } else if (erasing.current) {
-      eraseAt(p);
+      eraseAt([e.clientX, e.clientY]);
       redraw();
     }
   };
@@ -207,20 +238,22 @@ export function Ink({ uiScale, panelInset }: { uiScale: number; panelInset: numb
     live.current = null;
     const all = useApp.getState().annotations;
     if (l) {
-      const [a, b] = [l.points[0], l.points[l.points.length - 1]];
-      const len = Math.hypot((b[0] - a[0]) * size.current.W, (b[1] - a[1]) * size.current.H);
+      const a = engine?.project(l.points[0]);
+      const b = engine?.project(l.points[l.points.length - 1]);
+      const len = a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
       const keep = l.kind === 'pen' || l.kind === 'highlighter' || len > 12;
       if (keep) commit([...all, l]);
       else redraw();
     } else if (erasing.current) {
       const ids = erasing.current;
       erasing.current = null;
-      if (ids.size) commit(all.filter((a) => !ids.has(a.id)));
+      if (ids.size) commit(all.filter((x) => !ids.has(x.id)));
       else redraw();
     }
   };
 
   const R = 250 * uiScale;
+  const editAt = editing && engine ? engine.project(editing.w) : null;
   return (
     <>
       {spot && (
@@ -242,15 +275,14 @@ export function Ink({ uiScale, panelInset }: { uiScale: number; panelInset: numb
         onPointerUp={onUp}
         onPointerCancel={onUp}
       />
-      {editing && (
+      {editing && editAt && (
         <input
           className="ink-input"
           autoFocus
           aria-label="Label text"
-          placeholder="Type a label"
           value={editing.text}
           maxLength={60}
-          style={{ left: editing.p[0] * size.current.W, top: editing.p[1] * size.current.H, color: draw.color, fontSize: Math.round((24 + draw.width * 1.4) * uiScale) }}
+          style={{ left: editAt[0], top: editAt[1], color: draw.color, fontSize: Math.round((24 + draw.width * 1.4) * uiScale) }}
           onChange={(e) => setEditing({ ...editing, text: e.target.value })}
           onKeyDown={(e) => {
             e.stopPropagation();

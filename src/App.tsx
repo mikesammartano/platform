@@ -92,6 +92,8 @@ export function App() {
     try {
       e = new Engine(canvasRef.current!);
       setEngine(e);
+      // test hook for the end-to-end suite and debugging (development builds only)
+      if (import.meta.env.DEV) Object.assign(window, { __engine: e, __app: useApp });
     } catch (err) {
       console.error(err);
       setFailed(true);

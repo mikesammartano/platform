@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  ARC_X, CHAMBER, MELT, SLAB, VOLCANO, buildQuakeCatalog, labY, prng, slabCoords, slabPoint, slabTangent, slabTopY,
+  ARC_X, CHAMBER, CYCLE, HYPOCENTER, MELT, SLAB, VOLCANO, buildQuakeCatalog, cycleAt, labY, prng, slabCoords, slabPoint,
+  slabTangent, slabTopY,
 } from './model';
 import { heightAt } from './terrain';
 
@@ -17,7 +18,11 @@ export function buildQuakes() {
   const mag = new Float32Array(n);
   const period = new Float32Array(n);
   const phase = new Float32Array(n);
+  const kind = new Float32Array(n);
+  const dist = new Float32Array(n);
   cat.forEach((q, i) => {
+    kind[i] = q.kind === 'interface' ? 0 : 1;
+    dist[i] = Math.hypot(q.x - HYPOCENTER.x, q.y - HYPOCENTER.y);
     pos.set([q.x, q.y, FACE_Z], i * 3);
     depth[i] = Math.min(1, q.depthKm / 300);
     mag[i] = q.mag;
@@ -30,9 +35,12 @@ export function buildQuakes() {
   geo.setAttribute('aMag', new THREE.BufferAttribute(mag, 1));
   geo.setAttribute('aPeriod', new THREE.BufferAttribute(period, 1));
   geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  geo.setAttribute('aKind', new THREE.BufferAttribute(kind, 1));
+  geo.setAttribute('aDist', new THREE.BufferAttribute(dist, 1));
   const stops = DEPTH_STOPS.map((c) => new THREE.Color(c));
   const uniforms = {
     uTime: { value: 0 },
+    uSince: { value: 99 },
     uPx: { value: 1 },
     uOpacity: { value: 1 },
     uDepthColor: { value: 0 },
@@ -44,14 +52,21 @@ export function buildQuakes() {
     transparent: true,
     depthWrite: false,
     vertexShader: /* glsl */ `
-      attribute float aDepth, aMag, aPeriod, aPhase;
-      uniform float uTime, uPx, uDepthColor; uniform vec3 uStops[4];
+      attribute float aDepth, aMag, aPeriod, aPhase, aKind, aDist;
+      uniform float uTime, uSince, uPx, uDepthColor; uniform vec3 uStops[4];
       varying vec3 vCol; varying float vT; varying float vCore;
       vec3 ramp(float t){ t = clamp(t, 0., 1.) * 3.; if (t < 1.) return mix(uStops[0], uStops[1], t); if (t < 2.) return mix(uStops[1], uStops[2], t - 1.); return mix(uStops[2], uStops[3], t - 2.); }
       void main(){
-        vCol = mix(vec3(1., .42, .26), ramp(aDepth), uDepthColor);
+        vCol = mix(vec3(.98, .47, .32), ramp(aDepth), uDepthColor);
         vT = fract(uTime / aPeriod + aPhase);
-        float core = 3.2 + (aMag - 3.) * 1.7;
+        if (aKind < .5) {
+          // interface events: quiet while the fault is locked, a burst of aftershocks after the great earthquake
+          float after = 1. - smoothstep(0., 14., uSince);
+          vT = fract(uTime / (aPeriod * mix(2.2, .3, after)) + aPhase);
+          float arrive = uSince - aDist / 160.;
+          if (arrive > 0. && arrive < .8) vT = arrive * .12;
+        }
+        float core = 2.8 + (aMag - 3.) * 1.6;
         vCore = core;
         gl_PointSize = core * 3.2 * uPx;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
@@ -120,12 +135,13 @@ export function buildMagma() {
   const sp = softPoints(N, new THREE.Color('#E0601E'), 4);
   sp.uniforms.uHot.value = 0.6;
   const r = prng(5);
-  const seeds = Array.from({ length: N }, () => ({ off: r(), dx: (r() - 0.5) * 30, wob: r() * 6.28, size: 0.75 + r() * 0.5 }));
+  // bodies rise as one batch per cycle, so each arrival at the chamber lines up with an eruption pulse
+  const seeds = Array.from({ length: N }, (_, i) => ({ off: (i / N) * 0.13, dx: (r() - 0.5) * 34, wob: r() * 6.28, size: 0.7 + r() * 0.55 }));
   const startY = MELT.y + 4;
   const endY = CHAMBER.y - CHAMBER.ry * 0.6;
   const update = (t: number, px: number) => {
     seeds.forEach((sd, i) => {
-      const life = (t / 16 + sd.off) % 1;
+      const life = (t / CYCLE.magmaRise + sd.off) % 1;
       const y = startY + (endY - startY) * life;
       const x = MELT.x + sd.dx * (1 - life) + (CHAMBER.x - MELT.x) * life + Math.sin(t * 0.6 + sd.wob) * 1.5;
       sp.pos.set([x, y, FACE_Z - 0.2], i * 3);
@@ -166,8 +182,9 @@ export function buildWater() {
 
 /** Slow solid-state mantle flow: corner flow in the wedge and drag beneath the slab. */
 export function buildMantleFlow() {
-  const N = 320;
-  const sp = softPoints(N, new THREE.Color('#E8C8A8'), 3);
+  const N = 220;
+  const TRAIL = 5;
+  const sp = softPoints(N * TRAIL, new THREE.Color('#EBC9A3'), 3);
   const r = prng(23);
   type P = { x: number; y: number; age: number; life: number };
   const parts: P[] = [];
@@ -208,9 +225,14 @@ export function buildMantleFlow() {
         if (p.age > p.life || !(inWedge(p.x, p.y) || inSub(p.x, p.y)) || p.y < -335) Object.assign(p, spawn());
       }
       const a = Math.sin(Math.PI * Math.min(1, p.age / p.life));
-      sp.pos.set([p.x, p.y, FACE_Z - 0.3], i * 3);
-      sp.size[i] = 5;
-      sp.alpha[i] = a * 0.4;
+      const v = vel(p.x, p.y);
+      // short comet trail behind each particle shows the direction of slow solid-state flow
+      for (let k = 0; k < TRAIL; k++) {
+        const j = i * TRAIL + k;
+        sp.pos.set([p.x - v.x * k * 2.2, p.y - v.y * k * 2.2, FACE_Z - 0.3], j * 3);
+        sp.size[j] = 6 - k * 0.8;
+        sp.alpha[j] = a * 0.5 * (1 - k / TRAIL);
+      }
     });
     sp.uniforms.uPx.value = px;
     sp.geo.attributes.position.needsUpdate = true;
@@ -273,11 +295,15 @@ export function buildPlume() {
       p.s.scale.set(sc, sc, 1);
       p.mat.rotation = p.rot + t * p.spin * 0.2;
       const fade = Math.min(1, life * 8) * (1 - life) ** 1.4;
-      p.mat.opacity = fade * 0.85 * opacity;
+      // each puff carries the eruption strength from the moment it left the crater
+      const born = cycleAt(t - life * 26).erupt;
+      p.mat.opacity = fade * (0.35 + 0.65 * born) * opacity;
       const g = (0.24 + life * 0.3) * p.shade;
       p.mat.color.setRGB(g, g * 0.97, g * 0.95);
     });
-    glowMat.opacity = (0.55 + 0.15 * Math.sin(t * 2.3)) * opacity;
+    const e = cycleAt(t).erupt;
+    glowMat.opacity = (0.3 + 0.6 * e + 0.1 * Math.sin(t * 2.3)) * opacity;
+    glow.scale.set(12 + 8 * e, 8 + 5 * e, 1);
   };
   return { group, update };
 }

@@ -11,6 +11,8 @@ export type TeachStep = {
   layers: Partial<Layers>;
   evidence: Partial<Evidence>;
   labels: LabelKey[];
+  /** Optional timeline position (0..1) to jump to, so the key moment plays soon after the step opens. */
+  seek?: number;
 };
 
 const quiet: Partial<Layers> = {
@@ -44,7 +46,7 @@ export const TEACH_STEPS: TeachStep[] = [
   },
   {
     title: 'Plates',
-    note: 'Two plates meet here. Watch the arrows to see how each one moves.',
+    note: 'Two plates meet here. Follow the white bands on the ocean plate.',
     ask: 'Which plate is moving beneath the other?',
     view: 'combined',
     focus: null,
@@ -64,13 +66,15 @@ export const TEACH_STEPS: TeachStep[] = [
   },
   {
     title: 'Earthquakes',
-    note: 'Notice how earthquake depth changes beneath the continent.',
+    note: 'Notice how earthquake depth changes beneath the continent. Watch the stuck fault slip.',
     ask: 'What pattern do you notice?',
     view: 'combined',
     focus: 'earthquakes',
     layers: { ...quiet, surface: true, plates: true, plateMotion: true, earthquakes: true, volcanoes: true, labels: true },
     evidence: { ...noEvidence, earthquakeDepth: true },
     labels: ['earthquakes', 'subduction'],
+    // a few seconds before the great earthquake on the locked fault
+    seek: 0.66,
   },
   {
     title: 'Magma',
@@ -84,7 +88,7 @@ export const TEACH_STEPS: TeachStep[] = [
   },
   {
     title: 'Volcanic arc',
-    note: 'Melted rock rises, collects in the crust, and some of it erupts.',
+    note: 'Melted rock rises and collects in the crust. Each new batch feeds an eruption.',
     ask: 'Why are volcanoes located inland from the trench?',
     view: 'combined',
     focus: 'arc',

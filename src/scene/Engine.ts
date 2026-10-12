@@ -5,8 +5,9 @@ import { type Pose, FOCUS_POSES, VIEW_POSES, poseFor } from './cameras';
 import { buildGpsArrows, buildMagma, buildMantleFlow, buildMotionArrows, buildPlume, buildQuakes, buildWater } from './effects';
 import { SUN_DIR, buildOcean, buildSky } from './environment';
 import { DEFAULT_LABELS, LABELS } from './labels';
+import { SECTION_BOTTOM, X_MAX, X_MIN, cycleAt } from './model';
 import { buildSection } from './section';
-import { buildTerrain } from './terrain';
+import { TERRAIN_NX, buildTerrain, heightAt } from './terrain';
 
 THREE.ColorManagement.enabled = false;
 
@@ -44,12 +45,17 @@ export class Engine {
 
   private modelTime = 0;
   private advect = 0;
-  private dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-  private maxDpr = this.dpr;
+  private dpr = 1;
+  private maxDpr = 1;
+  private adapted = false;
+  private shown = false;
   private perf = { acc: 0, frames: 0, slow: 0, fast: 0 };
 
   private labels = new Map<LabelKey, LabelHandle>();
   private frameListeners = new Set<(progress: number) => void>();
+  private cameraListeners = new Set<() => void>();
+  private camSig = '';
+  private raycaster = new THREE.Raycaster();
   private unsub: () => void;
 
   private sky = buildSky();
@@ -84,12 +90,17 @@ export class Engine {
         this.applyScene(s.scene, false);
         if (s.scene.view !== prev.scene.view || s.scene.focus !== prev.scene.focus) this.flyTo(poseFor(s.scene.view, s.scene.focus));
       }
+      if (s.seekReq !== prev.seekReq && s.seekReq) this.seek(s.seekReq.progress);
       if (s.resetSeq !== prev.resetSeq) {
         this.modelTime = 0;
         this.advect = 0;
       }
       this.dirty = true;
     });
+
+    // Interactive boards and Chromebooks can drop the GPU context (sleep, driver reset). Recover by reloading.
+    canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+    canvas.addEventListener('webglcontextrestored', () => window.location.reload());
 
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.tick);
@@ -100,6 +111,11 @@ export class Engine {
     this.width = width;
     this.height = height;
     this.uiScale = uiScale;
+    // Pixel budget: about 1080p x 1.4 worth of pixels, so 4K boards and Chromebooks both hold frame rate.
+    const budget = Math.sqrt((1920 * 1080 * 1.4) / Math.max(1, width * height));
+    this.maxDpr = Math.max(0.5, Math.min(window.devicePixelRatio || 1, 1.5, budget));
+    this.dpr = this.adapted ? Math.min(this.dpr, this.maxDpr) : this.maxDpr;
+    this.renderer.setPixelRatio(this.dpr);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.updateProjection();
@@ -129,6 +145,60 @@ export class Engine {
       h.h = txt.offsetHeight;
     });
     this.dirty = true;
+  }
+
+  /** Called whenever the camera or projection changes (annotations re-project on this). */
+  onCamera(fn: () => void) {
+    this.cameraListeners.add(fn);
+    return () => void this.cameraListeners.delete(fn);
+  }
+
+  /** Screen position (css px) of a world point; null when it is behind the camera. */
+  project(v: [number, number, number]): [number, number] | null {
+    const q = new THREE.Vector3(...v).project(this.camera);
+    if (q.z > 1 || q.z < -1) return null;
+    return [((q.x + 1) / 2) * this.width, ((1 - q.y) / 2) * this.height];
+  }
+
+  /** World point under a screen position: the cut face, else the landscape or sea, else far along the ray. */
+  pick(cx: number, cy: number): [number, number, number] {
+    this.raycaster.setFromCamera(new THREE.Vector2((cx / this.width) * 2 - 1, -(cy / this.height) * 2 + 1), this.camera);
+    const { origin: o, direction: d } = this.raycaster.ray;
+    if (o.z > 0 && d.z < 0) {
+      const t = -o.z / d.z;
+      const x = o.x + d.x * t;
+      const y = o.y + d.y * t;
+      if (x > X_MIN && x < X_MAX && y > SECTION_BOTTOM - 400 && y < Math.max(this.profileAt(x), 0)) return [x, y, 1.2];
+    }
+    const below = (t: number) => {
+      const x = o.x + d.x * t;
+      const z = o.z + d.z * t;
+      if (z > 0) return false;
+      return o.y + d.y * t < Math.max(heightAt(x, z), 0);
+    };
+    let prev = 0;
+    for (let t = 2; t < 7000; t += Math.max(2, t * 0.012)) {
+      if (below(t)) {
+        let a = prev;
+        let b = t;
+        for (let i = 0; i < 10; i++) {
+          const m = (a + b) / 2;
+          if (below(m)) b = m;
+          else a = m;
+        }
+        return [o.x + d.x * b, o.y + d.y * b + 0.5, o.z + d.z * b];
+      }
+      prev = t;
+    }
+    return [o.x + d.x * 1500, o.y + d.y * 1500, o.z + d.z * 1500];
+  }
+
+  private profileAt(x: number) {
+    const prof = this.terrain.profile;
+    const f = ((x - X_MIN) / (X_MAX - X_MIN)) * TERRAIN_NX;
+    const i = Math.max(0, Math.min(TERRAIN_NX - 1, Math.floor(f)));
+    const k = Math.min(1, Math.max(0, f - i));
+    return prof[i] * (1 - k) + prof[i + 1] * k;
   }
 
   onFrame(fn: (progress: number) => void) {
@@ -307,6 +377,15 @@ export class Engine {
 
     this.update(simDt);
     this.renderer.render(this.scene, this.camera);
+    if (!this.shown) {
+      this.shown = true;
+      this.renderer.domElement.dataset.ready = '1';
+    }
+    const sig = this.camera.projectionMatrix.elements.join() + this.camera.matrixWorld.elements.join();
+    if (sig !== this.camSig) {
+      this.camSig = sig;
+      this.cameraListeners.forEach((fn) => fn());
+    }
     this.updateLabels(st.scene);
     const p = this.progress;
     this.frameListeners.forEach((fn) => fn(p));
@@ -328,8 +407,19 @@ export class Engine {
     this.ocean.uniforms.uTime.value = t;
     this.ocean.uniforms.uBathy.value = f('bathymetry');
 
+    const cyc = cycleAt(t);
+    const quakesOn = f('earthquakes');
+    this.terrain.material.uniforms.uErupt.value = cyc.erupt * f('volcanoes');
+    this.ocean.uniforms.uSince.value = cyc.since;
+    this.ocean.uniforms.uQuakes.value = quakesOn;
+
     const su = this.section.uniforms;
     su.uTime.value = t;
+    su.uStrain.value = cyc.strain;
+    su.uSince.value = cyc.since;
+    su.uDeform.value = cyc.deform;
+    su.uErupt.value = cyc.erupt;
+    su.uQuakes.value = quakesOn;
     su.uAdvect.value = this.advect;
     su.uSurface.value = surf > 0.5 ? 1 : 0;
     su.uPlates.value = f('plates');
@@ -342,6 +432,7 @@ export class Engine {
 
     const q = this.quakes.uniforms;
     q.uTime.value = t;
+    q.uSince.value = cyc.since;
     q.uPx.value = px;
     q.uOpacity.value = f('earthquakes') * (1 - 0.55 * f('temperature'));
     q.uDepthColor.value = f('depth');
@@ -426,13 +517,14 @@ export class Engine {
     else p.slow = 0;
     if (avg < 1 / 55) p.fast++;
     else p.fast = 0;
-    if (p.slow >= 2 && this.dpr > 0.75) {
-      this.dpr = Math.max(0.75, this.dpr - 0.25);
+    if (p.slow >= 2 && this.dpr > 0.5) {
+      this.dpr = Math.max(0.5, this.dpr - 0.2);
+      this.adapted = true;
       this.renderer.setPixelRatio(this.dpr);
       this.renderer.setSize(this.width, this.height, false);
       p.slow = 0;
     } else if (p.fast >= 5 && this.dpr < this.maxDpr) {
-      this.dpr = Math.min(this.maxDpr, this.dpr + 0.25);
+      this.dpr = Math.min(this.maxDpr, this.dpr + 0.2);
       this.renderer.setPixelRatio(this.dpr);
       this.renderer.setSize(this.width, this.height, false);
       p.fast = 0;

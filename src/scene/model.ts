@@ -223,29 +223,29 @@ export function buildQuakeCatalog(): Quake[] {
 
   const maxS = slabCoords(slabXAtY(SECTION_BOTTOM + 25), SECTION_BOTTOM + 25).s;
 
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < 46; i++) {
     const s = 6 + Math.pow(r(), 0.9) * 105;
     const p = slabPoint(s, -1.5 + r() * 5);
     push(p.x, p.y, 'interface');
   }
-  for (let i = 0; i < 170; i++) {
+  for (let i = 0; i < 115; i++) {
     // density decreases with depth
     const s = 60 + (-Math.log(1 - r() * 0.985) / 3.2) * (maxS - 60);
     if (s > maxS) continue;
     const p = slabPoint(s, 2 + r() * 17);
     push(p.x, p.y, 'intraslab');
   }
-  for (let i = 0; i < 34; i++) {
+  for (let i = 0; i < 22; i++) {
     const s = 110 + r() * 150;
     const p = slabPoint(s, 30 + r() * 8);
     push(p.x, p.y, 'lower-plane');
   }
-  for (let i = 0; i < 16; i++) {
+  for (let i = 0; i < 10; i++) {
     const s = -120 + r() * 85;
     const p = slabPoint(s, 1 + r() * 22);
     push(p.x, p.y, 'outer-rise');
   }
-  for (let i = 0; i < 26; i++) {
+  for (let i = 0; i < 14; i++) {
     const x = ARC_X - 40 + r() * 260;
     const y = -3 - r() * 22;
     push(x, y, 'crustal');
@@ -255,3 +255,53 @@ export function buildQuakeCatalog(): Quake[] {
 
 /** Plate convergence used for labels and the Plate motion evidence. */
 export const CONVERGENCE_CM_PER_YR = 7;
+
+// ---------------------------------------------------------------- earthquake cycle and eruptions
+/**
+ * One playback loop is one simplified earthquake cycle on the plate interface (megathrust):
+ *  0 .. RUPTURE  the shallow interface is locked; strain builds and the forearc is dragged down
+ *  RUPTURE       the locked patch slips: great earthquake, seismic waves, forearc rebounds up, tsunami
+ *  afterwards    aftershocks, the forearc settles, the interface locks again
+ * Arc eruptions pulse each time a batch of magma reaches the crustal chamber.
+ */
+export const CYCLE = { loop: 60, rupture: 44, magmaRise: 20 } as const;
+/** Locked patch of the megathrust, as distances down the plate interface. */
+export const LOCKED = { s0: 8, s1: 100 } as const;
+export const HYPOCENTER = slabPoint(62, 1);
+/** Where the tsunami starts: sea surface above the seafloor that moved most. */
+export const TSUNAMI_X = 32;
+
+export type CycleState = {
+  /** 0..1 strain stored on the locked interface */
+  strain: number;
+  /** seconds since the last great earthquake (large when none recent) */
+  since: number;
+  /** vertical motion of the forearc, -1 (dragged down) .. +0.7 (rebound) */
+  deform: number;
+  /** 0..1 eruption intensity */
+  erupt: number;
+};
+
+const mod = (a: number, b: number) => ((a % b) + b) % b;
+
+export function cycleAt(t: number): CycleState {
+  const tl = mod(t, CYCLE.loop);
+  const r = CYCLE.rupture;
+  const strain = tl < r ? tl / r : 0;
+  const since = tl >= r ? tl - r : tl + (CYCLE.loop - r);
+  const deform = tl < r ? -Math.pow(strain, 1.2) : 0.7 * Math.exp(-(tl - r) / 4);
+  const ph = mod(t, CYCLE.magmaRise) / CYCLE.magmaRise;
+  // magma bodies reach the chamber at the end of each rise; eruptions follow
+  const erupt = 0.3 + 0.7 * Math.pow(Math.max(0, Math.cos(Math.PI * 2 * (ph - 0.08))), 8);
+  return { strain, since, deform, erupt };
+}
+
+/**
+ * Accretionary wedge: sediment scraped off the incoming plate piles up at the toe of the overriding plate.
+ * Rock above the plate interface and seaward of this boundary (x < boundary) belongs to the wedge.
+ * The boundary with the continental "backstop" dips steeply landward.
+ */
+export const PRISM = { x1: 64, dip: 0.45 } as const;
+export function prismBoundaryX(y: number): number {
+  return PRISM.x1 + PRISM.dip * (y + 15);
+}

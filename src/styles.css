@@ -31,7 +31,8 @@ button:focus-visible { outline: var(--focus); outline-offset: -3px; }
 button:disabled, button[aria-disabled='true'] { cursor: default; }
 
 .stage { position: fixed; inset: 0; }
-.gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity 0.9s ease; }
+.gl[data-ready='1'] { opacity: 1; }
 .ink { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; touch-action: none; }
 .ink[data-active='1'] { pointer-events: auto; cursor: crosshair; }
 .ink[data-tool='eraser'] { cursor: cell; }

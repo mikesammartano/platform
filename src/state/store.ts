@@ -56,6 +56,8 @@ export type AppState = {
   speed: (typeof SPEEDS)[number];
   /** Incremented to ask the engine to rewind the model clock. */
   resetSeq: number;
+  /** Teach steps can jump the timeline to the moment that shows their idea. */
+  seekReq: { progress: number } | null;
 
   draw: { tool: DrawTool; color: string; width: number };
   annotations: Annotation[];
@@ -114,6 +116,7 @@ export const useApp = create<AppState>()((set, get) => ({
   playing: !prefersReducedMotion(),
   speed: 1,
   resetSeq: 0,
+  seekReq: null,
 
   draw: { tool: 'pen', color: '#F2C94C', width: 7 },
   annotations: [],
@@ -157,7 +160,13 @@ export const useApp = create<AppState>()((set, get) => ({
   startTeach: () => set({ teach: { active: true, step: 0 }, panelOpen: true, scene: applyStep(0) }),
   teachGo: (step) => {
     const clamped = Math.max(0, Math.min(TEACH_STEPS.length - 1, step));
-    set({ teach: { active: true, step: clamped }, scene: applyStep(clamped) });
+    if (clamped === get().teach.step && get().teach.active) return;
+    const seek = TEACH_STEPS[clamped].seek;
+    set({
+      teach: { active: true, step: clamped },
+      scene: applyStep(clamped),
+      ...(seek !== undefined ? { seekReq: { progress: seek }, playing: !prefersReducedMotion() || get().playing } : {}),
+    });
   },
   // Leaving Teach keeps the scene the teacher is looking at; Reset is available for a clean start.
   exitTeach: () => set((st) => ({ teach: { active: false, step: 0 }, scene: { ...st.scene, labelSet: null } })),
