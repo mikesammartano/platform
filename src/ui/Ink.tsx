@@ -122,7 +122,7 @@ export function Ink({ uiScale, panelInset }: { uiScale: number; panelInset: numb
   const annotations = useApp((s) => s.annotations);
   const draw = useApp((s) => s.draw);
   const commit = useApp((s) => s.commitAnnotations);
-  const active = useApp((s) => s.panelOpen && !s.presenting && !s.teach.active && s.tab === 'draw');
+  const active = useApp((s) => s.panelOpen && !s.teach.active && s.tab === 'draw');
   const live = useRef<Annotation | null>(null);
   const erasing = useRef<Set<number> | null>(null);
   const pointer = useRef<number | null>(null);

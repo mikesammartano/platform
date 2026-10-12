@@ -5,7 +5,7 @@ import { EngineCtx } from './ui/context';
 import { Ink } from './ui/Ink';
 import { LabelLayer } from './ui/Labels';
 import {
-  ClosedControls, ExitPresentButton, InfoButton, Legends, MiniPlayback, ModelNote, Playback, enterPresentation, exitPresentation,
+  ClosedControls, InfoButton, Legends, MiniPlayback, ModelNote, Playback, PresentControls, enterPresentation, exitPresentation,
 } from './ui/Overlay';
 import { Panel } from './ui/Panel';
 
@@ -49,7 +49,9 @@ function useShortcuts() {
         e.preventDefault();
         st.togglePlay();
       } else if (e.key === 'Escape') {
-        if (st.presenting) void exitPresentation();
+        // Esc backs out one level: tools, then teaching, then presentation
+        if (st.presenting && st.panelOpen) st.setPanelOpen(false);
+        else if (st.presenting) void exitPresentation();
         else if (st.teach.active) st.exitTeach();
       } else if (st.teach.active && (e.key === 'ArrowRight' || e.key === 'PageDown')) {
         // presentation clickers send PageDown / PageUp
@@ -61,7 +63,7 @@ function useShortcuts() {
       } else if (e.key.toLowerCase() === 'p') {
         if (st.presenting) void exitPresentation();
         else void enterPresentation();
-      } else if (e.key.toLowerCase() === 't' && !st.presenting) {
+      } else if (e.key.toLowerCase() === 't') {
         st.setPanelOpen(!st.panelOpen);
       }
     };
@@ -115,7 +117,7 @@ export function App() {
     engine?.resize(vw, vh, s);
   }, [engine, vw, vh, s]);
 
-  const open = panelOpen && !presenting;
+  const open = panelOpen;
   const insetPx = open ? PANEL_SPACE * s : 0;
   useEffect(() => {
     engine?.setPanelInset(insetPx);
@@ -146,8 +148,8 @@ export function App() {
           {presenting ? (
             <>
               <InfoButton />
-              <MiniPlayback left={(W - PLAYBACK_W) / 2} />
-              <ExitPresentButton />
+              <MiniPlayback left={playLeft} />
+              {!panelOpen && <PresentControls />}
             </>
           ) : (
             <>

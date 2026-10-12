@@ -154,7 +154,8 @@ export const useApp = create<AppState>()((set, get) => ({
   setTab: (tab) => set({ tab }),
   setPanelOpen: (panelOpen) => set({ panelOpen }),
   setGeologyOpen: (geologyOpen) => set({ geologyOpen }),
-  setPresenting: (presenting) => set({ presenting, noteOpen: false }),
+  // entering Presentation starts clean (tools collapsed); the Tools button can still open them while presenting
+  setPresenting: (presenting) => set((st) => ({ presenting, noteOpen: false, panelOpen: presenting ? false : st.panelOpen })),
   setNoteOpen: (noteOpen) => set({ noteOpen }),
 
   startTeach: () => set({ teach: { active: true, step: 0 }, panelOpen: true, scene: applyStep(0) }),

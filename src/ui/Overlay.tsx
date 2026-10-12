@@ -24,28 +24,38 @@ export async function exitPresentation() {
   }
 }
 
-export function ClosedControls() {
+function ToolsButton({ size = 30 }: { size?: number }) {
   const setOpen = useApp((s) => s.setPanelOpen);
+  return (
+    <button className="tools-btn glass" onClick={() => setOpen(true)} aria-label="Open Teacher Tools">
+      <Icon d={PATHS.open} size={size} />
+      Tools
+    </button>
+  );
+}
+
+export function ClosedControls() {
   return (
     <>
       <button className="tools-btn glass present-btn" onClick={enterPresentation} aria-label="Present full screen">
         <Icon d={PATHS.present} size={28} />
         Present
       </button>
-      <button className="tools-btn glass" onClick={() => setOpen(true)} aria-label="Open Teacher Tools">
-        <Icon d={PATHS.open} size={30} />
-        Tools
-      </button>
+      <ToolsButton />
     </>
   );
 }
 
-export function ExitPresentButton() {
+/** Presentation: Teacher Tools stay one tap away, next to Exit. */
+export function PresentControls() {
   return (
-    <button className="exit-present" onClick={exitPresentation}>
-      <Icon d={PATHS.exitPresent} size={24} />
-      Exit
-    </button>
+    <div className="top-actions">
+      <ToolsButton size={24} />
+      <button className="exit-present" onClick={exitPresentation} aria-label="Exit presentation">
+        <Icon d={PATHS.exitPresent} size={24} />
+        Exit
+      </button>
+    </div>
   );
 }
 

@@ -13,7 +13,7 @@ const TABS: { id: Tab; label: string; d: string }[] = [
 ];
 
 export function Panel() {
-  const open = useApp((s) => s.panelOpen && !s.presenting);
+  const open = useApp((s) => s.panelOpen);
   const tab = useApp((s) => s.tab);
   const teaching = useApp((s) => s.teach.active);
   const setTab = useApp((s) => s.setTab);

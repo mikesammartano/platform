@@ -226,14 +226,22 @@ test('Reset restores the scene but keeps drawings; Collapse and Tools', async ({
   expect((await S(page)).panelOpen).toBe(true);
 });
 
-test('Presentation mode hides tools and exits cleanly', async ({ page }) => {
+test('Presentation mode: tools hidden, Tools button opens them, Esc backs out', async ({ page }) => {
   await open(page);
   await btn(page, 'Collapse Teacher Tools').click();
   await btn(page, 'Present full screen').click();
   expect((await S(page)).presenting).toBe(true);
-  await expect(page.getByRole('complementary', { name: 'Teacher Tools', includeHidden: true })).toHaveAttribute('data-open', '0');
+  const panel = page.getByRole('complementary', { name: 'Teacher Tools', includeHidden: true });
+  await expect(panel).toHaveAttribute('data-open', '0');
   await btn(page, 'Model note').click();
   await expect(page.getByRole('note')).toContainText('Simplified model');
-  await btn(page, 'Exit').click();
+  // Tools are one tap away while presenting
+  await btn(page, 'Open Teacher Tools').click();
+  await expect(panel).toHaveAttribute('data-open', '1');
+  expect((await S(page)).presenting).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveAttribute('data-open', '0');
+  expect((await S(page)).presenting).toBe(true);
+  await btn(page, 'Exit presentation').click();
   expect((await S(page)).presenting).toBe(false);
 });
