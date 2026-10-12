@@ -174,7 +174,7 @@ function DrawTab() {
     if (!confirming) {
       setConfirming(true);
       window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setConfirming(false), 3000);
+      timer.current = window.setTimeout(() => setConfirming(false), 5000);
       return;
     }
     window.clearTimeout(timer.current);
