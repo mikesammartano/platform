@@ -25,7 +25,7 @@ export async function exitPresentation() {
 function ToolsButton({ size = 30 }: { size?: number }) {
   const setOpen = useApp((s) => s.setPanelOpen);
   return (
-    <button className="tools-btn glass" onClick={() => setOpen(true)} aria-label="Open Teacher Tools">
+    <button className="tools-btn lg" onClick={() => setOpen(true)} aria-label="Open Teacher Tools">
       <Icon d={PATHS.open} size={size} />
       Tools
     </button>
@@ -35,7 +35,7 @@ function ToolsButton({ size = 30 }: { size?: number }) {
 export function ClosedControls() {
   return (
     <>
-      <button className="tools-btn glass present-btn" onClick={enterPresentation} aria-label="Present full screen">
+      <button className="tools-btn lg present-btn" onClick={enterPresentation} aria-label="Present full screen">
         <Icon d={PATHS.present} size={28} />
         Present
       </button>
@@ -49,7 +49,7 @@ export function PresentControls() {
   return (
     <div className="top-actions">
       <ToolsButton size={24} />
-      <button className="exit-present" onClick={exitPresentation} aria-label="Exit presentation">
+      <button className="exit-present lg" onClick={exitPresentation} aria-label="Exit presentation">
         <Icon d={PATHS.exitPresent} size={24} />
         Exit
       </button>
@@ -143,7 +143,7 @@ export function Playback({ left }: { left: number }) {
   const cycle = useApp((s) => s.cycleSpeed);
   const idle = useIdle(5000);
   return (
-    <div className="playback" style={{ left }} data-idle={idle && playing ? '1' : '0'} role="group" aria-label="Playback">
+    <div className="playback lg" style={{ left }} data-idle={idle && playing ? '1' : '0'} role="group" aria-label="Playback">
       <button className="pp" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
         {playing ? <PauseGlyph /> : <PlayGlyph />}
       </button>
@@ -177,7 +177,7 @@ export function Legends() {
   const items: React.ReactNode[] = [];
   if (ev.gps && surface)
     items.push(
-      <div className="legend" key="gps">
+      <div className="legend lg" key="gps">
         <div className="t">Plate motion</div>
         <div className="row">
           <svg width="56" height="16" viewBox="0 0 56 16" aria-hidden="true" style={{ flex: 'none' }}>
@@ -189,7 +189,7 @@ export function Legends() {
     );
   if (ev.bathymetry)
     items.push(
-      <div className="legend" key="bathy">
+      <div className="legend lg" key="bathy">
         <div className="t">Ocean depth</div>
         <div className="bar" style={{ background: grad(['#9EE6E0', '#3DA8CC', '#2166B3', '#1F3385', '#1A0F4D']) }} />
         <div className="ends"><span>0 km</span><span>8 km</span></div>
@@ -197,7 +197,7 @@ export function Legends() {
     );
   if (ev.topography)
     items.push(
-      <div className="legend" key="topo">
+      <div className="legend lg" key="topo">
         <div className="t">Elevation</div>
         <div className="bar" style={{ background: grad(['#407A3D', '#A8A852', '#A8703D', '#7A4F3D', '#F2F0EB']) }} />
         <div className="ends"><span>0 km</span><span>6 km</span></div>
@@ -205,7 +205,7 @@ export function Legends() {
     );
   if (ev.temperature)
     items.push(
-      <div className="legend" key="temp">
+      <div className="legend lg" key="temp">
         <div className="t">Temperature</div>
         <div className="bar" style={{ background: grad(['#29459E', '#3899CC', '#F2E6A8', '#F29E40', '#D14029', '#73122B']) }} />
         <div className="ends"><span>Cold</span><span>Hot</span></div>
@@ -213,7 +213,7 @@ export function Legends() {
     );
   if (quakes && ev.earthquakeDepth)
     items.push(
-      <div className="legend" key="depth">
+      <div className="legend lg" key="depth">
         <div className="t">Earthquake depth</div>
         <div className="bar" style={{ background: grad(DEPTH_STOPS) }} />
         <div className="ends"><span>Shallow</span><span>Deep</span></div>

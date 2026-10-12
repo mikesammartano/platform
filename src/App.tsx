@@ -31,6 +31,35 @@ function useViewport() {
   return v;
 }
 
+/** Liquid glass sheen: the highlight on the glass under the pointer or finger follows it. */
+function useGlassSheen() {
+  useEffect(() => {
+    let raf = 0;
+    let last: PointerEvent | null = null;
+    const apply = () => {
+      raf = 0;
+      const e = last;
+      if (!e) return;
+      const el = (e.target as HTMLElement | null)?.closest?.('.lg') as HTMLElement | null;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      el.style.setProperty('--mx', `${(((e.clientX - r.left) / r.width) * 100).toFixed(1)}%`);
+      el.style.setProperty('--my', `${(((e.clientY - r.top) / r.height) * 100).toFixed(1)}%`);
+    };
+    const on = (e: PointerEvent) => {
+      last = e;
+      if (!raf) raf = requestAnimationFrame(apply);
+    };
+    window.addEventListener('pointermove', on, { passive: true });
+    window.addEventListener('pointerdown', on, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', on);
+      window.removeEventListener('pointerdown', on);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+}
+
 function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -88,6 +117,7 @@ export function App() {
   const panelOpen = useApp((st) => st.panelOpen);
   const presenting = useApp((st) => st.presenting);
   useShortcuts();
+  useGlassSheen();
 
   useEffect(() => {
     let e: Engine | null = null;

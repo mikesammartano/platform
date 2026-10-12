@@ -105,8 +105,13 @@ export function buildSection(profile: Float32Array) {
       // tsunami: a trench-parallel wave that spreads both ways from above the rupture
       float tsunamiAt(float x){
         if (uSince > 16.) return 0.;
-        float d = abs(x - TSUNAMI_X) - 55. * uSince;
-        return uQuakes * 2.6 * exp(-d * d / 160.) * exp(-uSince / 9.) * smoothstep(0., .6, uSince);
+        // shallow-water waves travel at sqrt(g * depth): fast over the deep ocean, slowing (and growing taller)
+        // as they cross the shallow shelf toward the coast
+        bool landward = x > TSUNAMI_X;
+        float c = landward ? 34. : 62.;
+        float d = abs(x - TSUNAMI_X) - c * uSince;
+        float shoal = landward ? 1. + .9 * smoothstep(TSUNAMI_X, COAST_X, x) : 1.;
+        return uQuakes * 2.2 * shoal * exp(-d * d / (landward ? 110. : 180.)) * exp(-uSince / 9.) * smoothstep(0., .6, uSince);
       }
 
       void main(){
@@ -117,7 +122,9 @@ export function buildSection(profile: Float32Array) {
         // elastic rebound: rock above the locked fault is dragged down, then springs back in the earthquake
         vec2 sn0 = slabSN(p);
         if (sn0.y < 0. && p.x > 0. && p.x < 260.) {
-          float bell = exp(-pow((p.x - 48.) / 42., 2.));
+          // seafloor above the locked patch is dragged down between earthquakes and springs up in them,
+          // while the coast farther inland does the opposite (subsides in the earthquake)
+          float bell = exp(-pow((p.x - 48.) / 42., 2.)) - .35 * exp(-pow((p.x - 140.) / 45., 2.));
           p.y -= uDeform * 5. * bell * smoothstep(0., 5., -sn0.y);
         }
         float x = p.x, y = p.y;

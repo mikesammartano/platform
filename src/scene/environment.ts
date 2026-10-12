@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { ATMOS, NOISE, NOISE_D } from './glsl';
-import { TSUNAMI_X } from './model';
+import { COAST_X, TSUNAMI_X } from './model';
 
 /** Late-afternoon sun low over the ocean, in the upper left of the default view. */
 export const SUN_DIR = new THREE.Vector3(-0.3, 0.12, -0.95).normalize();
@@ -154,11 +154,16 @@ export function buildOcean(heightTex: THREE.Texture, bounds: THREE.Vector4) {
         // tsunami: a long, low wave front parallel to the trench, running out to sea and toward the coast
         float tsu = 0.;
         if (uSince < 16. && uQuakes > 0.) {
+          // same physics as the cut face: slower and taller over the shallow shelf, faster out to sea
           float side = sign(q.x - ${TSUNAMI_X.toFixed(2)});
-          float dd = abs(q.x - ${TSUNAMI_X.toFixed(2)}) - 55. * uSince;
-          float env = uQuakes * exp(-uSince / 9.) * smoothstep(0., .6, uSince);
-          tsu = exp(-dd * dd / 160.) * env;
-          g.x += -2. * dd / 160. * tsu * side * 1.6;
+          bool landward = side > 0.;
+          float c = landward ? 34. : 62.;
+          float wid = landward ? 110. : 180.;
+          float dd = abs(q.x - ${TSUNAMI_X.toFixed(2)}) - c * uSince;
+          float shoal = landward ? 1. + .9 * smoothstep(${TSUNAMI_X.toFixed(2)}, ${COAST_X.toFixed(2)}, q.x) : 1.;
+          float env = uQuakes * exp(-uSince / 9.) * smoothstep(0., .6, uSince) * shoal;
+          tsu = exp(-dd * dd / wid) * env;
+          g.x += -2. * dd / wid * tsu * side * 1.6;
         }
         vec3 n = normalize(vec3(-g.x, 1., -g.y));
 

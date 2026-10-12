@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useContext, useEffect, useRef, useState } from 'react';
 import { TEACH_STEPS } from '../content/teach';
 import { useApp } from '../state/store';
 import type { DrawTool, EvidenceKey, FocusKey, LayerKey, Tab, ViewMode } from '../state/types';
@@ -19,12 +19,14 @@ export function Panel() {
   const setTab = useApp((s) => s.setTab);
 
   return (
-    <aside className="panel" data-open={open ? '1' : '0'} aria-label="Teacher Tools" aria-hidden={!open} inert={!open}>
+    <aside className="panel lg" data-open={open ? '1' : '0'} aria-label="Teacher Tools" aria-hidden={!open} inert={!open}>
       {teaching ? (
         <TeachView />
       ) : (
         <>
-          <div className="tabs" role="tablist" aria-label="Tools">
+          <div className="tabs" role="tablist" aria-label="Tools" style={{ '--i': TABS.findIndex((t) => t.id === tab) } as CSSProperties}>
+            {/* a single glass pill slides to the selected tool */}
+            <span className="tab-ind" aria-hidden="true" />
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -40,7 +42,7 @@ export function Panel() {
               </button>
             ))}
           </div>
-          <div className="panel-body scroll" id="tool-body" role="tabpanel" aria-labelledby={`tab-${tab}`}>
+          <div className="panel-body scroll tab-in" key={tab} id="tool-body" role="tabpanel" aria-labelledby={`tab-${tab}`}>
             {tab === 'show' && <ShowTab />}
             {tab === 'evidence' && <EvidenceTab />}
             {tab === 'draw' && <DrawTab />}
@@ -281,7 +283,8 @@ function ViewTab() {
   return (
     <div style={{ flex: 1, marginTop: 18, display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="seg" role="group" aria-label="View">
+        <div className="seg" role="group" aria-label="View" data-free={focus ? '1' : '0'} style={{ '--i': VIEWS.findIndex((v) => v[0] === view) } as CSSProperties}>
+          <span className="seg-ind" aria-hidden="true" />
           {VIEWS.map(([id, label]) => (
             <button key={id} aria-pressed={view === id && !focus} onClick={() => setView(id)}>
               {label}
@@ -361,7 +364,7 @@ function TeachView() {
           </button>
         ))}
       </div>
-      <div className="scroll" style={{ flex: 1, minHeight: 0 }}>
+      <div className="scroll step-in" key={step} style={{ flex: 1, minHeight: 0 }}>
         <h2 ref={headRef} tabIndex={-1} style={{ outline: 'none' }}>
           {s.title}
         </h2>
