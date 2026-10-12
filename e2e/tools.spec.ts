@@ -233,8 +233,6 @@ test('Presentation mode: tools hidden, Tools button opens them, Esc backs out', 
   expect((await S(page)).presenting).toBe(true);
   const panel = page.getByRole('complementary', { name: 'Teacher Tools', includeHidden: true });
   await expect(panel).toHaveAttribute('data-open', '0');
-  await btn(page, 'Model note').click();
-  await expect(page.getByRole('note')).toContainText('Simplified model');
   // Tools are one tap away while presenting
   await btn(page, 'Open Teacher Tools').click();
   await expect(panel).toHaveAttribute('data-open', '1');

@@ -49,7 +49,6 @@ export type AppState = {
   tab: Tab;
   geologyOpen: boolean;
   presenting: boolean;
-  noteOpen: boolean;
   teach: { active: boolean; step: number };
 
   playing: boolean;
@@ -72,7 +71,6 @@ export type AppState = {
   setPanelOpen: (open: boolean) => void;
   setGeologyOpen: (open: boolean) => void;
   setPresenting: (on: boolean) => void;
-  setNoteOpen: (on: boolean) => void;
 
   startTeach: () => void;
   teachGo: (step: number) => void;
@@ -110,7 +108,6 @@ export const useApp = create<AppState>()((set, get) => ({
   tab: 'show',
   geologyOpen: false,
   presenting: false,
-  noteOpen: false,
   teach: { active: false, step: 0 },
 
   playing: !prefersReducedMotion(),
@@ -155,8 +152,7 @@ export const useApp = create<AppState>()((set, get) => ({
   setPanelOpen: (panelOpen) => set({ panelOpen }),
   setGeologyOpen: (geologyOpen) => set({ geologyOpen }),
   // entering Presentation starts clean (tools collapsed); the Tools button can still open them while presenting
-  setPresenting: (presenting) => set((st) => ({ presenting, noteOpen: false, panelOpen: presenting ? false : st.panelOpen })),
-  setNoteOpen: (noteOpen) => set({ noteOpen }),
+  setPresenting: (presenting) => set((st) => ({ presenting, panelOpen: presenting ? false : st.panelOpen })),
 
   startTeach: () => set({ teach: { active: true, step: 0 }, panelOpen: true, scene: applyStep(0) }),
   teachGo: (step) => {

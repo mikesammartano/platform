@@ -5,7 +5,7 @@ import { EngineCtx } from './ui/context';
 import { Ink } from './ui/Ink';
 import { LabelLayer } from './ui/Labels';
 import {
-  ClosedControls, InfoButton, Legends, MiniPlayback, ModelNote, Playback, PresentControls, enterPresentation, exitPresentation,
+  ClosedControls, Legends, MiniPlayback, Playback, PresentControls, enterPresentation, exitPresentation,
 } from './ui/Overlay';
 import { Panel } from './ui/Panel';
 
@@ -147,13 +147,11 @@ export function App() {
           <Legends />
           {presenting ? (
             <>
-              <InfoButton />
               <MiniPlayback left={playLeft} />
               {!panelOpen && <PresentControls />}
             </>
           ) : (
             <>
-              <ModelNote />
               <Playback left={playLeft} />
               {!panelOpen && <ClosedControls />}
             </>

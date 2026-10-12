@@ -4,8 +4,6 @@ import { useApp } from '../state/store';
 import { EngineCtx } from './context';
 import { Icon, PATHS, PauseGlyph, PlayGlyph } from './icons';
 
-export const NOTE = 'Simplified model. Motion is accelerated. Scale and geometry are not exact.';
-
 export async function enterPresentation() {
   useApp.getState().setPresenting(true);
   try {
@@ -167,23 +165,6 @@ export function MiniPlayback({ left }: { left: number }) {
       </button>
       <Track mini />
     </div>
-  );
-}
-
-export function ModelNote() {
-  return <div className="note passive">{NOTE}</div>;
-}
-
-export function InfoButton() {
-  const open = useApp((s) => s.noteOpen);
-  const setOpen = useApp((s) => s.setNoteOpen);
-  return (
-    <>
-      <button className="info-btn" aria-label="Model note" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <Icon d={PATHS.info} size={26} />
-      </button>
-      {open && <div className="info-pop glass" role="note">{NOTE}</div>}
-    </>
   );
 }
 

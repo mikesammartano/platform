@@ -66,8 +66,7 @@ constants (`glsl.ts`), so the picture and the tests cannot drift apart.
 - **Temperature** is a qualitative thermal structure: a cold slab core pushes isotherms down, the mantle wedge is
   hot, and the forearc is cool.
 - **Scale.** Deep structure is drawn 1:1. Ocean depth is exaggerated 5×, and land relief about 12× so mountains read
-  across a classroom. The on-screen note says so: *Simplified model. Motion is accelerated. Scale and geometry are not
-  exact.*
+  across a classroom.
 
 ## Rendering
 
