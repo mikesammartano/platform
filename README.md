@@ -134,6 +134,10 @@ src/
 - `public/textures/sky_blouberg_sunrise_2_1k.hdr`: "Blouberg Sunrise 2" by Greg Zaal, [Poly Haven](https://polyhaven.com/a/blouberg_sunrise_2), CC0.
   Used for the clouds seen in ocean reflections, rotated to match the scene's sun.
 - `public/textures/waternormals.jpg`: wave normal map from the [three.js examples](https://github.com/mrdoob/three.js/tree/dev/examples/textures).
+- `public/textures/rock_strata_normal.webp`, `rock_grain_normal.webp`, `rock_rough_normal.webp`, `cloud_puff.webp`:
+  CC0 tileable normal maps ([emmelleppi/normal-maps](https://github.com/emmelleppi/normal-maps)) and a cloud puff, via
+  [@pmndrs/assets](https://github.com/pmndrs/assets) (CC0). They add rock relief to the cut face (strata in the crust,
+  crystalline grain in the slab and mantle) and the close-up terrain, and shape the eruption column's billows.
 - `public/geo/*_color.webp`: contains modified Copernicus Sentinel data 2020 processed by Sentinel Hub
   ([Sentinel-2 L2A 120 m mosaic](https://registry.opendata.aws/sentinel-s2-l2a-mosaic-120/)), CC BY 4.0.
 - `public/geo/*_dem.webp`: [Terrarium elevation tiles](https://registry.opendata.aws/terrain-tiles/) (Mapzen; SRTM,

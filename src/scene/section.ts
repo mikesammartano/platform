@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { NOISE, NOISE_D, SLAB_GLSL } from './glsl';
 import { HYPOCENTER, LOCKED, PRISM, SECTION_BOTTOM, TSUNAMI_X, X_MAX, X_MIN, slabCoords } from './model';
 import { PROFILE_N } from './terrain';
+import { detailTex } from './textures';
 
 export type SectionUniforms = {
   uProfile: { value: THREE.DataTexture };
@@ -20,6 +21,8 @@ export type SectionUniforms = {
   uDeform: { value: number };
   uErupt: { value: number };
   uQuakes: { value: number };
+  uStrataN: { value: THREE.Texture };
+  uGrainN: { value: THREE.Texture };
 };
 
 /**
@@ -62,6 +65,9 @@ export function buildSection(profile: Float32Array) {
     uDeform: { value: 0 },
     uErupt: { value: 0.5 },
     uQuakes: { value: 1 },
+    // CC0 tileable normal maps: layered strata (crust) and crystalline grain (mantle, slab)
+    uStrataN: { value: detailTex('rock_strata_normal.webp') },
+    uGrainN: { value: detailTex('rock_grain_normal.webp') },
   };
 
   const material = new THREE.ShaderMaterial({
@@ -79,6 +85,7 @@ export function buildSection(profile: Float32Array) {
       uniform sampler2D uProfile;
       uniform float uAdvect, uTime, uSurface, uPlates, uMantle, uMagma, uCrust, uLith, uAsth, uTemp;
       uniform float uStrain, uSince, uDeform, uErupt, uQuakes;
+      uniform sampler2D uStrataN, uGrainN;
       varying vec2 vXY;
       const float NX = ${PROFILE_N.toFixed(1)};
       const float TSUNAMI_X = ${TSUNAMI_X.toFixed(2)};
@@ -302,8 +309,16 @@ export function buildSection(profile: Float32Array) {
 
         // cinematic depth falloff on the cut face
         col *= mix(1.05, .68, smoothstep(-20., ${SECTION_BOTTOM.toFixed(1)}, y));
-        // carved-rock relief: the cut face is lit by a soft key light from the upper left
-        vec2 bg = noised(p * .16 + 3.1).yz * .16 * 5. + noised(p * .62 + 7.7).yz * .62 * 1.1 + noised(p * 2.1).yz * 2.1 * .12;
+        // carved-rock relief, lit by a soft key light from the upper left: broad undulation from noise, rock
+        // texture from tileable normal maps (layered strata in the crust, crystalline grain in mantle and slab;
+        // the slab's grain rides with the plate)
+        vec2 macro = noised(p * .16 + 3.1).yz * .16 * 5.;
+        vec2 nStr = texture2D(uStrataN, p * vec2(.04, .085)).xy * 2. - 1.;
+        bool inPlate = n >= 0. && n <= SLAB_H;
+        vec2 nGrn = texture2D(uGrainN, (inPlate ? pc : p) * .055).xy * 2. - 1.;
+        vec2 nFine = texture2D(uGrainN, p * .21 + .37).xy * 2. - 1.;
+        float crustW = step(0., x) * smoothstep(moho - aa, moho + aa, y) * (1. - smoothstep(-aa, aa, n));
+        vec2 bg = macro + mix(nGrn, nStr, crustW) * 1.25 + nFine * .35;
         float rockK = 1. - inPrism * .3;
         vec3 fn = normalize(vec3(-bg * .65 * rockK, 1.));
         float relief = .8 + .32 * dot(fn, normalize(vec3(-.55, .62, .56)));

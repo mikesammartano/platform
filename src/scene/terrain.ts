@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { LAND_VE, VE, VOLCANO, X_MAX, X_MIN, Z_FAR, seafloorAnalytic } from './model';
 import { ATMOS, NOISE, NOISE_D } from './glsl';
+import { detailTex } from './textures';
 
 /**
  * Real landscape: the central Andes north of a cut at 23.4 S (through Lascar volcano), from
@@ -323,6 +324,7 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays, rendere
       uMidN: { value: dataTex(data.midNL, data.midN) },
       uNearN: { value: dataTex(data.nearNL, data.nearN) },
       uFarN: { value: dataTex(data.farNL, data.farN) },
+      uRockN: { value: detailTex('rock_rough_normal.webp') },
       uMidB: { value: boxVec(MID_BOX) },
       uNearB: { value: boxVec(NEAR_BOX) },
       uFarB: { value: boxVec(FAR_BOX) },
@@ -340,7 +342,7 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays, rendere
       ${ATMOS}
       uniform vec3 uSun; uniform vec3 uSkySun; uniform vec3 uCamPos;
       uniform float uBathy; uniform float uTopo; uniform vec3 uVolc; uniform float uErupt; uniform float uTime;
-      uniform sampler2D uMidC, uNearC, uFarC, uMidN, uNearN, uFarN; uniform vec4 uMidB, uNearB, uFarB;
+      uniform sampler2D uMidC, uNearC, uFarC, uMidN, uNearN, uFarN, uRockN; uniform vec4 uMidB, uNearB, uFarB;
       varying vec3 vPos; varying vec3 vNormal;
       vec3 lin(vec3 c){ return c * c; }
       vec3 ramp5(float t, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e){
@@ -375,11 +377,13 @@ export function buildTerrain(sunDir: THREE.Vector3, data: TerrainArrays, rendere
         float snowK = smoothstep(.45, .7, min(alb.r, min(alb.g, alb.b))) * step(30., h);
 
         // close up: fine relief and grain below the data resolution
+        // rough rock relief from a tileable CC0 normal map at two scales (sampled outside the branch)
+        vec2 r1 = texture2D(uRockN, q * .33).xy * 2. - 1.;
+        vec2 r2 = texture2D(uRockN, ROT * q * 1.37 + .5).xy * 2. - 1.;
         if (fade > 0.) {
-          vec2 g = vec2(0.); float a = 1., sc = 1.6; vec2 p = q * sc;
-          for (int i = 0; i < 3; i++){ g += noised(p).yz * a * sc; p = ROT * p; a *= .5; sc *= 2.; }
+          vec2 g = r1 + r2 * .55;
           float slope = 1. - n.y;
-          n = normalize(n - vec3(g.x, 0., g.y) * (.05 + .25 * slope) * (1. - snowK * .7) * fade);
+          n = normalize(n + vec3(g.x, 0., -g.y) * (.06 + .4 * slope) * (1. - snowK * .7) * fade);
           alb *= 1. + (fbm3(q * 2.3) - .5) * .35 * fade;
         }
         if (h < -.15) alb = mix(alb, lin(vec3(.13, .14, .14)), smoothstep(-2., -16., h));

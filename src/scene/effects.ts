@@ -4,6 +4,7 @@ import {
   slabTangent, slabTopY,
 } from './model';
 import { heightAt } from './terrain';
+import { detailTex } from './textures';
 import { KEY_DIR } from './environment';
 import { NOISE } from './glsl';
 
@@ -295,7 +296,7 @@ export function buildPlume() {
   geo.setAttribute('iData', iData);
   geo.setAttribute('iHeat', iHeat);
   geo.instanceCount = N;
-  const uniforms = { uKey: { value: KEY_DIR.clone() }, uOpacity: { value: 1 } };
+  const uniforms = { uKey: { value: KEY_DIR.clone() }, uOpacity: { value: 1 }, uCloud: { value: detailTex('cloud_puff.webp', { repeat: false }) } };
   const mat = new THREE.ShaderMaterial({
     uniforms,
     transparent: true,
@@ -316,18 +317,20 @@ export function buildPlume() {
     fragmentShader: /* glsl */ `
       precision highp float;
       ${NOISE}
-      uniform float uOpacity;
+      uniform float uOpacity; uniform sampler2D uCloud;
       varying vec2 vUv; varying float vAlpha; varying float vSeed; varying float vHeat; varying vec3 vKeyV;
       void main(){
         vec2 q = vUv * 2. - 1.;
         float r2 = dot(q, q);
-        if (r2 > 1.) discard;
-        float n = fbm5(q * 1.6 + vSeed);
-        float dens = smoothstep(0., .55, (1. - r2) * (.45 + n));
+        // a CC0 cloud puff gives each billow its shape; mirrored on half the puffs for variety
+        vec2 tuv = mix(vUv, vec2(1. - vUv.x, vUv.y), step(.5, fract(vSeed * 3.17)));
+        vec4 puff = texture2D(uCloud, tuv);
+        float dens = puff.a * (1. - smoothstep(.75, 1., r2));
         if (dens < .01) discard;
-        // billow normal: sphere + noise relief, lit by the key light and sky
-        vec3 nrm = normalize(vec3(q + (vec2(fbm3(q * 2.3 + vSeed + 4.), fbm3(q * 2.3 + vSeed + 9.)) - .5) * .9, sqrt(max(1. - r2, 0.)) + .2));
-        float lit = max(dot(nrm, vKeyV), 0.);
+        // billow normal: sphere plus the puff's own relief, lit by the key light and sky
+        float shade = dot(puff.rgb, vec3(.333));
+        vec3 nrm = normalize(vec3(q * (1.15 - shade * .4), sqrt(max(1. - r2, 0.)) + .2));
+        float lit = max(dot(nrm, vKeyV), 0.) * (.55 + .6 * shade);
         vec3 ash = vec3(.06, .055, .05);
         vec3 col = ash * (.25 + .35 * nrm.y) + vec3(1., .86, .7) * 1.5 * lit * .35 + vec3(.25, .32, .45) * .12;
         // glow from the vent on the lowest, hottest puffs

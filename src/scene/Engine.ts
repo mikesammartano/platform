@@ -7,6 +7,7 @@ import { KEY_DIR, SUN_DIR, buildOcean, buildSky } from './environment';
 import { DEFAULT_LABELS, LABELS } from './labels';
 import { SECTION_BOTTOM, X_MAX, X_MIN, cycleAt } from './model';
 import { buildPost } from './post';
+import { onDetailLoad } from './textures';
 import { buildSection } from './section';
 import { PROFILE_N, type TerrainArrays, adoptTerrain, buildTerrain, computeTerrain, heightAt } from './terrain';
 
@@ -115,7 +116,8 @@ export class Engine {
     this.applyScene(st.scene, true);
     this.setPose(poseFor(st.scene.view, st.scene.focus));
 
-    this.unsub = useApp.subscribe((s, prev) => {
+    const offTex = onDetailLoad(() => (this.dirty = true));
+    const offApp = useApp.subscribe((s, prev) => {
       if (s.scene !== prev.scene) {
         this.applyScene(s.scene, false);
         if (s.scene.view !== prev.scene.view || s.scene.focus !== prev.scene.focus) this.flyTo(poseFor(s.scene.view, s.scene.focus));
@@ -127,6 +129,10 @@ export class Engine {
       }
       this.dirty = true;
     });
+    this.unsub = () => {
+      offApp();
+      offTex();
+    };
 
     // Interactive boards and Chromebooks can drop the GPU context (sleep, driver reset). Recover by reloading.
     canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
