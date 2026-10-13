@@ -1,34 +1,35 @@
 /**
- * Idealized oceanic-continental (Andes-type) subduction margin.
+ * Oceanic-continental subduction margin: the central Andes at 23.4 S (Nazca plate under South America),
+ * cut through Lascar volcano. The landscape is real (see terrain.ts); the deep structure follows published
+ * slab geometry (Slab2) and is simplified for teaching.
  *
  * Coordinates (scene units):
- *   x  east, from the ocean basin (x < 0) toward the continent (x > 0). Trench axis at x = 0.
+ *   x  east, from the ocean basin (x < 0) toward the continent (x > 0). Trench axis at x = 0 (71.35 W).
  *   y  up. Sea level at y = 0.
  *   z  along the margin (strike). The cross-section is cut at z = 0; the landscape extends to z < 0.
  *
  * Scale: 1 unit = 1 km for deep structure. Surface relief (ocean depth, land elevation) is drawn with a
  * vertical exaggeration of VE so a 6 km mountain or 8 km trench is visible next to a 300 km deep slab.
- * The model note on screen says "Scale and geometry are not exact."
  *
  * Reference values (approximate, central Andes / Nazca plate):
- *   abyssal seafloor ~4.4 km deep, trench ~8 km, peaks ~6 km
- *   slab dip ~10-15 deg at the trench, steepening to ~30 deg below ~90 km depth
+ *   abyssal seafloor ~4.4 km deep, Atacama trench ~8 km, Lascar 5.6 km, Altiplano-Puna ~4 km
+ *   slab dip ~6-10 deg at the trench, steepening to ~30 deg below ~150 km depth
  *   oceanic lithosphere ~80 km thick, oceanic crust ~7 km
- *   arc volcanoes sit where the slab top is ~110-120 km deep
+ *   arc volcanoes sit where the slab top is ~120-140 km deep (Lascar: ~130 km)
  *   convergence ~7 cm/yr
  */
 
 export const VE = 5;
 /** Land relief is exaggerated more than ocean depth so mountains read at classroom scale (display units per km). */
-export const LAND_VE = 12;
+export const LAND_VE = 7;
 
 const DEG = Math.PI / 180;
 
 export const SLAB = {
   trenchY: -40, // 8 km * VE
-  theta0: 12 * DEG, // dip at the trench
+  theta0: 6 * DEG, // dip at the trench
   theta1: 30 * DEG, // dip of the straight, deeper slab
-  R: 480, // bending radius
+  R: 1400, // bending radius (gentle: the Nazca slab is shallow beneath the forearc)
   H: 80, // lithosphere thickness
   crust: 9, // oceanic crust (7 km, slightly thickened for legibility)
   outerRiseX: -150,
@@ -36,14 +37,14 @@ export const SLAB = {
 
 /** Seafloor depth reference of the ocean basin, display units. */
 export const ABYSSAL_Y = -22;
-/** Coastline (sea level crossing) at z = 0. */
-export const COAST_X = 95;
+/** Coastline (sea level crossing) at z = 0: the cliffed coast south of Antofagasta. */
+export const COAST_X = 76;
 /** Section bottom. */
 export const SECTION_BOTTOM = -330;
 /** Horizontal extent of the modelled block. */
 export const X_MIN = -900;
 export const X_MAX = 2600;
-export const Z_FAR = -9000;
+export const Z_FAR = -4400;
 
 const n0 = { x: -Math.sin(SLAB.theta0), y: -Math.cos(SLAB.theta0) };
 /** Bending circle center. Points on the slab top arc are C + R (sin t, cos t). */
@@ -147,9 +148,11 @@ export function slabXAtY(y: number): number {
   return (lo + hi) / 2;
 }
 
-/** Arc volcanoes sit above the slab where its top is ~118 km deep. */
-export const ARC_SLAB_DEPTH = -118;
+/** Arc volcanoes sit above the slab where its top is ~130 km deep. */
+export const ARC_SLAB_DEPTH = -130;
 export const ARC_X = Math.round(slabXAtY(ARC_SLAB_DEPTH));
+/** Lascar volcano, 23.37 S 67.73 W, in scene km (the cut runs through its summit). */
+export const LASCAR_X = 369.5;
 
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -158,7 +161,8 @@ const smooth = (a: number, b: number, x: number) => {
 
 /** Continental Moho (base of continental crust). Thick crust under the arc and plateau. */
 export function mohoY(x: number): number {
-  const thick = smooth(COAST_X - 20, ARC_X + 10, x) * (1 - smooth(470, 680, x));
+  // thick crust under the Altiplano-Puna, thinning under the Subandes and Chaco plains
+  const thick = smooth(COAST_X - 20, ARC_X + 10, x) * (1 - smooth(600, 720, x));
   return -34 - 28 * thick;
 }
 
@@ -172,10 +176,10 @@ export function labY(x: number): number {
   return forearc + (arc - forearc) * toArc + (interior - arc) * toInterior;
 }
 
-/** Main arc volcano, placed just behind the cut so the section slices through its flank. */
-export const VOLCANO = { x: ARC_X, z: -1, radius: 40, height: 19 };
+/** Main arc volcano (Lascar), just behind the cut so the section slices through its flank. */
+export const VOLCANO = { x: LASCAR_X, z: -2, radius: 14 };
 /** Upper-crust magma storage under the arc. */
-export const CHAMBER = { x: ARC_X - 2, y: -20, rx: 20, ry: 6.5 };
+export const CHAMBER = { x: LASCAR_X - 2, y: -20, rx: 20, ry: 6.5 };
 
 /** Slab position where fluids are released and the mantle wedge melts (slab top ~100-140 km). */
 export const MELT = (() => {

@@ -267,3 +267,12 @@ button:disabled, button[aria-disabled='true'] { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* data attribution (required by the imagery licence), quiet at the end of the View tab */
+.credit {
+  margin: auto 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.42);
+}

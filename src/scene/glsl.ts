@@ -56,7 +56,7 @@ vec2 slabSN(vec2 p){
 }
 float sm(float a, float b, float x){ return smoothstep(a, b, x); }
 float mohoY(float x){
-  float thick = sm(COAST_X - 20., ARC_X + 10., x) * (1. - sm(470., 680., x));
+  float thick = sm(COAST_X - 20., ARC_X + 10., x) * (1. - sm(600., 720., x));
   return -34. - 28. * thick;
 }
 float labY(float x){

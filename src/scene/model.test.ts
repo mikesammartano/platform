@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ARC_X, CHAMBER, COAST_X, MELT, SLAB, SLAB_ARC_LEN, buildQuakeCatalog, labY, mohoY,
+  ARC_X, CHAMBER, COAST_X, LASCAR_X, MELT, SLAB, SLAB_ARC_LEN, buildQuakeCatalog, labY, mohoY,
   seafloorAnalytic, slabCoords, slabPoint, slabTopY,
 } from './model';
 
@@ -21,17 +21,18 @@ describe('subduction geometry', () => {
     }
   });
 
-  it('steepens with depth: ~12 deg at the trench and ~30 deg at depth', () => {
+  it('steepens with depth: ~6 deg at the trench and ~30 deg at depth (Nazca slab, Slab2)', () => {
     const dip = (x: number) => (Math.atan(slabTopY(x) - slabTopY(x + 1)) * 180) / Math.PI;
-    expect(dip(1)).toBeGreaterThan(10);
-    expect(dip(1)).toBeLessThan(15);
-    expect(dip(400)).toBeCloseTo(30, 0);
+    expect(dip(1)).toBeGreaterThan(5);
+    expect(dip(1)).toBeLessThan(9);
+    expect(dip(700)).toBeCloseTo(30, 0);
   });
 
-  it('puts the volcanic arc inland, where the slab is ~110-130 km deep', () => {
+  it('puts the volcanic arc at Lascar, where the slab is ~120-140 km deep', () => {
     expect(ARC_X).toBeGreaterThan(COAST_X + 50);
-    expect(slabTopY(ARC_X)).toBeLessThan(-110);
-    expect(slabTopY(ARC_X)).toBeGreaterThan(-130);
+    expect(Math.abs(ARC_X - LASCAR_X)).toBeLessThan(10);
+    expect(slabTopY(LASCAR_X)).toBeLessThan(-120);
+    expect(slabTopY(LASCAR_X)).toBeGreaterThan(-140);
   });
 
   it('generates magma in the mantle wedge above the slab, not inside it', () => {

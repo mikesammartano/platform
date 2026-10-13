@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { NOISE, NOISE_D, SLAB_GLSL } from './glsl';
 import { HYPOCENTER, LOCKED, PRISM, SECTION_BOTTOM, TSUNAMI_X, X_MAX, X_MIN, slabCoords } from './model';
-import { TERRAIN_NX } from './terrain';
+import { PROFILE_N } from './terrain';
 
 export type SectionUniforms = {
   uProfile: { value: THREE.DataTexture };
@@ -80,7 +80,7 @@ export function buildSection(profile: Float32Array) {
       uniform float uAdvect, uTime, uSurface, uPlates, uMantle, uMagma, uCrust, uLith, uAsth, uTemp;
       uniform float uStrain, uSince, uDeform, uErupt, uQuakes;
       varying vec2 vXY;
-      const float NX = ${TERRAIN_NX.toFixed(1)};
+      const float NX = ${PROFILE_N.toFixed(1)};
       const float TSUNAMI_X = ${TSUNAMI_X.toFixed(2)};
       const float LOCK_S0 = ${LOCKED.s0.toFixed(2)}, LOCK_S1 = ${LOCKED.s1.toFixed(2)};
       const vec2 HYPO = vec2(${HYPOCENTER.x.toFixed(3)}, ${HYPOCENTER.y.toFixed(3)});

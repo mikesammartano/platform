@@ -1,0 +1,34 @@
+{
+ "lat0": -23.37,
+ "lonTrench": -71.35,
+ "R_km": 6371.0,
+ "near": {
+  "x0": -650.0,
+  "x1": 1100.0,
+  "z0": 0.0,
+  "z1": -1750.0,
+  "color": 4096,
+  "dem": 2048
+ },
+ "far": {
+  "x0": -1600.0,
+  "x1": 2600.0,
+  "z0": 0.0,
+  "z1": -4400.0,
+  "color": 2048,
+  "dem": 1024
+ },
+ "mid": {
+  "x0": -150.0,
+  "x1": 650.0,
+  "z0": 0.0,
+  "z1": -800.0,
+  "color": 4096,
+  "dem": 2048
+ },
+ "lascar": [
+  369.5034159884767,
+  -0.0
+ ],
+ "credit": "Elevation: Mapzen Terrarium (SRTM, GMTED, ETOPO1); imagery: contains modified Copernicus Sentinel data 2020 processed by Sentinel Hub (CC-BY 4.0)"
+}

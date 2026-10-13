@@ -8,9 +8,9 @@ const iface = slabPoint(55, 0);
 
 /** Curated camera states. The teacher picks a feature; there is no free camera. */
 export const VIEW_POSES: Record<ViewMode, Pose> = {
-  combined: { pos: [-40, 150, 900], target: [130, 10, -200], fov: 38 },
-  surface: { pos: [-260, 105, -70], target: [150, 6, -480], fov: 44 },
-  section: { pos: [140, -128, 900], target: [140, -128, 0], fov: 30 },
+  combined: { pos: [40, 165, 1060], target: [275, -35, -230], fov: 38 },
+  surface: { pos: [-330, 90, -60], target: [300, 8, -520], fov: 44 },
+  section: { pos: [330, -150, 1150], target: [330, -150, 0], fov: 30 },
 };
 
 export const FOCUS_POSES: Record<FocusKey, Pose> = {

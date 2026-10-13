@@ -5,16 +5,18 @@ import { type Pose, FOCUS_POSES, VIEW_POSES, poseFor } from './cameras';
 import { buildGpsArrows, buildMagma, buildMantleFlow, buildMotionArrows, buildPlume, buildQuakes, buildWater } from './effects';
 import { KEY_DIR, SUN_DIR, buildOcean, buildSky } from './environment';
 import { DEFAULT_LABELS, LABELS } from './labels';
-import { SECTION_BOTTOM, X_MAX, X_MIN, Z_FAR, cycleAt } from './model';
+import { SECTION_BOTTOM, X_MAX, X_MIN, cycleAt } from './model';
 import { buildPost } from './post';
 import { buildSection } from './section';
-import { TERRAIN_NX, TERRAIN_NZ, Z_POW, type TerrainArrays, buildTerrain, heightAt } from './terrain';
+import { PROFILE_N, type TerrainArrays, adoptTerrain, buildTerrain, computeTerrain, heightAt } from './terrain';
 
 
 /** One full cycle of the playback timeline, in seconds at 1x. */
 export const LOOP_SECONDS = 60;
 /** How fast plate texture travels, scene units per second at 1x (accelerated teaching model). */
 const PLATE_RATE = 7;
+/** Lowest render scale on a struggling GPU; below this the picture looks pixelated on a projector. */
+const MIN_DPR = 0.8;
 
 type Fade = { cur: number; target: number };
 const FADE_KEYS = [
@@ -73,9 +75,9 @@ export class Engine {
   private gps = buildGpsArrows();
   private post!: ReturnType<typeof buildPost>;
 
-  /** Generates the landscape in a worker (falls back to the main thread), then builds the engine. */
+  /** Builds the landscape from the elevation data in a worker (falls back to the main thread), then the engine. */
   static async create(canvas: HTMLCanvasElement): Promise<Engine> {
-    let data: TerrainArrays | undefined;
+    let data: TerrainArrays;
     try {
       const worker = new Worker(new URL('./terrain.worker.ts', import.meta.url), { type: 'module' });
       data = await new Promise<TerrainArrays>((resolve, reject) => {
@@ -85,16 +87,17 @@ export class Engine {
       });
       worker.terminate();
     } catch {
-      data = undefined;
+      data = await computeTerrain(KEY_DIR);
     }
+    adoptTerrain(data);
     return new Engine(canvas, data);
   }
 
-  constructor(canvas: HTMLCanvasElement, data?: TerrainArrays) {
-    this.terrain = buildTerrain(KEY_DIR, data);
+  constructor(canvas: HTMLCanvasElement, data: TerrainArrays) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', alpha: false });
+    this.terrain = buildTerrain(KEY_DIR, data, this.renderer, () => (this.dirty = true));
     this.ocean = buildOcean(this.terrain.heightTex, this.terrain.heightTexBounds);
     this.section = buildSection(this.terrain.profile);
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', alpha: false });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.85;
@@ -138,9 +141,9 @@ export class Engine {
     this.width = width;
     this.height = height;
     this.uiScale = uiScale;
-    // Pixel budget: about 1080p x 1.4 worth of pixels, so 4K boards and Chromebooks both hold frame rate.
-    const budget = Math.sqrt((1920 * 1080 * 1.4) / Math.max(1, width * height));
-    this.maxDpr = Math.max(0.5, Math.min(window.devicePixelRatio || 1, 1.5, budget));
+    // Pixel budget: about 1440p worth of pixels, so retina laptops render sharp and 4K boards hold frame rate.
+    const budget = Math.sqrt((2560 * 1440 * 1.1) / Math.max(1, width * height));
+    this.maxDpr = Math.max(MIN_DPR, Math.min(window.devicePixelRatio || 1, 2, budget));
     this.dpr = this.adapted ? Math.min(this.dpr, this.maxDpr) : this.maxDpr;
     this.renderer.setPixelRatio(this.dpr);
     this.renderer.setSize(width, height, false);
@@ -221,25 +224,15 @@ export class Engine {
     return [o.x + d.x * 1500, o.y + d.y * 1500, o.z + d.z * 1500];
   }
 
-  /** Bilinear height from the terrain mesh itself (much cheaper than evaluating the noise). */
+  /** Bilinear height from the elevation grids. */
   private gridHeight(x: number, z: number) {
-    if (x < X_MIN || x > X_MAX || z < Z_FAR) return heightAt(x, z);
-    const pos = this.terrain.mesh.geometry.getAttribute('position').array as Float32Array;
-    const nx = TERRAIN_NX;
-    const fi = ((x - X_MIN) / (X_MAX - X_MIN)) * nx;
-    const fj = TERRAIN_NZ * Math.pow(Math.min(1, Math.max(0, z / Z_FAR)), 1 / Z_POW);
-    const i = Math.min(nx - 1, Math.floor(fi));
-    const j = Math.min(TERRAIN_NZ - 1, Math.floor(fj));
-    const u = fi - i;
-    const v = fj - j;
-    const h = (ii: number, jj: number) => pos[(jj * (nx + 1) + ii) * 3 + 1];
-    return (h(i, j) * (1 - u) + h(i + 1, j) * u) * (1 - v) + (h(i, j + 1) * (1 - u) + h(i + 1, j + 1) * u) * v;
+    return heightAt(x, z);
   }
 
   private profileAt(x: number) {
     const prof = this.terrain.profile;
-    const f = ((x - X_MIN) / (X_MAX - X_MIN)) * TERRAIN_NX;
-    const i = Math.max(0, Math.min(TERRAIN_NX - 1, Math.floor(f)));
+    const f = ((x - X_MIN) / (X_MAX - X_MIN)) * PROFILE_N;
+    const i = Math.max(0, Math.min(PROFILE_N - 1, Math.floor(f)));
     const k = Math.min(1, Math.max(0, f - i));
     return prof[i] * (1 - k) + prof[i + 1] * k;
   }
@@ -551,19 +544,20 @@ export class Engine {
     const avg = p.acc / p.frames;
     p.acc = 0;
     p.frames = 0;
-    if (avg > 1 / 32) p.slow++;
+    if (avg > 1 / 28) p.slow++;
     else p.slow = 0;
     if (avg < 1 / 55) p.fast++;
     else p.fast = 0;
-    // Slow GPU: drop bloom first, then resolution. Fast again: restore resolution, then bloom.
-    if (p.slow >= 2 && (this.bloomOn || this.dpr > 0.5)) {
+    // Slow GPU: drop bloom first, then resolution in small steps, never below MIN_DPR (it turns blocky).
+    // Fast again: restore resolution, then bloom.
+    if (p.slow >= 3 && (this.bloomOn || this.dpr > MIN_DPR)) {
       if (this.bloomOn) this.bloomOn = false;
-      else this.dpr = Math.max(0.5, this.dpr - 0.2);
+      else this.dpr = Math.max(MIN_DPR, this.dpr - 0.15);
       this.adapted = true;
       this.applySize();
       p.slow = 0;
     } else if (p.fast >= 5 && (this.dpr < this.maxDpr || !this.bloomOn)) {
-      if (this.dpr < this.maxDpr) this.dpr = Math.min(this.maxDpr, this.dpr + 0.2);
+      if (this.dpr < this.maxDpr) this.dpr = Math.min(this.maxDpr, this.dpr + 0.15);
       else this.bloomOn = true;
       this.applySize();
       p.fast = 0;

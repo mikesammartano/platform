@@ -17,7 +17,7 @@ export type LabelDef = {
   onFace: boolean;
 };
 
-const sub = slabPoint(62, 0);
+const sub = slabPoint(115, 0);
 const eq = slabPoint(235, 10);
 const wedgeX = ARC_X + 55;
 
@@ -26,7 +26,11 @@ export const LABELS: LabelDef[] = [
   { key: 'subduction', text: 'Subduction zone', anchor: [sub.x, sub.y, 0.5], dx: -60, dy: 70, priority: 2, needs: (l) => l.plates, onFace: true },
   { key: 'earthquakes', text: 'Earthquakes', anchor: [eq.x, eq.y, 1], dx: -70, dy: 64, priority: 3, needs: (l) => l.earthquakes, onFace: true },
   {
-    key: 'arc', text: 'Volcanic arc', anchor: [VOLCANO.x, heightAt(VOLCANO.x, VOLCANO.z) + 1, VOLCANO.z], dx: -60, dy: -70, priority: 4,
+    key: 'arc', text: 'Volcanic arc', dx: -60, dy: -70, priority: 4,
+    // the summit height comes from the elevation data, which loads after this module
+    get anchor(): [number, number, number] {
+      return [VOLCANO.x, heightAt(VOLCANO.x, VOLCANO.z) + 1, VOLCANO.z];
+    },
     needs: (l) => l.surface, onFace: false,
   },
   { key: 'oceanic', text: 'Oceanic plate', anchor: [-330, slabPoint(-330, 30).y, 0.5], dx: -40, dy: -70, priority: 5, needs: (l) => l.plates, onFace: true },

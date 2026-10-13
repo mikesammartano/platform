@@ -302,6 +302,9 @@ function ViewTab() {
           </button>
         ))}
       </div>
+      <p className="credit">
+        Central Andes, 23.4° S. Imagery: Copernicus Sentinel-2 (2020), Sentinel Hub, CC BY 4.0. Elevation: Mapzen Terrarium.
+      </p>
     </div>
   );
 }

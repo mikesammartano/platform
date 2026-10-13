@@ -32,7 +32,7 @@ included.
 | **Teach** | 7-step guided sequence (Start, Plates, Trench, Earthquakes, Magma, Volcanic arc, Complete system) with an "Ask students" prompt for each step |
 | **Footer** | Reset returns view, layers, evidence, playback and focus to the starting state. It does **not** erase drawings. Collapse hides the panel. |
 | **Playback** | Play/pause, scrubbable progress, ½× / 1× / 2×. No fake elapsed time. The strip fades back after 5 s idle. |
-| **Present** | Full screen. Teacher Tools are hidden; labels, legends and a minimal playback line stay. Exit is at the top right, and the model note sits behind the ⓘ button. |
+| **Present** | Full screen. Teacher Tools are hidden; labels, legends and a minimal playback line stay. Tools and Exit stay as icon buttons at the top right. |
 
 Keyboard shortcuts: `Space` play/pause · `T` tools · `P` present · `L` labels · `←/→` or clicker `PageUp/PageDown` for
 Teach steps · `Esc` exits Presentation or Teach · `Ctrl/⌘+Z` undo, `Shift+Ctrl/⌘+Z` redo.
@@ -42,14 +42,17 @@ Teach steps · `Esc` exits Presentation or Teach · `Ctrl/⌘+Z` undo, `Shift+Ct
 All of the geometry lives in `src/scene/model.ts`, and `model.test.ts` checks it. The shaders bake in the same
 constants (`glsl.ts`), so the picture and the tests cannot drift apart.
 
-- **Idealized Andes-type margin.** The abyssal floor is ~4.4 km deep, with an outer rise and an ~8 km trench. The slab
-  dips ~12° at the trench, steepens to 30° and sinks past 300 km. The oceanic lithosphere is 80 km thick, with ~7 km of
+- **The central Andes at 23.4° S.** The Nazca plate meets South America at the Atacama trench (~8 km deep, 71.35° W).
+  The abyssal floor is ~4.4 km deep, with an outer rise. Following Slab2, the slab dips ~6° at the trench, stays
+  shallow under the forearc, steepens to 30° and sinks past 300 km. The oceanic lithosphere is 80 km thick, with ~7 km of
   crust. The continental crust thickens to ~62 km under the arc. Convergence is ~7 cm/yr.
 - **The ocean surface stays flat over the trench.** The trench exists only in the seafloor and the cross-section.
 - **The slab never melts.** Water is released from the slab (blue droplets) and causes partial melting in the mantle
   wedge above it. Separate magma bodies rise, collect in a crustal magma chamber and feed a short conduit to the
   volcano. The mantle is drawn as solid rock.
-- **The volcanic arc sits where the slab top is ~118 km deep.** It is ~180 km inland, and a test enforces this.
+- **The volcanic arc sits where the slab top is ~130 km deep.** That is under Láscar, ~370 km from the trench, and a
+  test enforces this. The section cuts through the real surface profile: coastal cliffs, the Coastal Cordillera,
+  the Central Depression, the Domeyko range, Salar de Atacama, the arc, the Puna plateau and the Chaco plains.
 - **Earthquakes** form a fixed catalog of ~330 events projected onto the section: interface thrusts near the trench,
   intraslab events to ~300 km, a weaker lower plane, outer-rise bending events and shallow crustal events. There are
   none in the hot mantle wedge. Each event flashes on its own cycle while playback runs.
@@ -65,20 +68,23 @@ constants (`glsl.ts`), so the picture and the tests cannot drift apart.
 - **Mantle** (Show ▸ Mantle) adds slow flow trails: corner flow in the wedge, dragged down beside the slab.
 - **Temperature** is a qualitative thermal structure: a cold slab core pushes isotherms down, the mantle wedge is
   hot, and the forearc is cool.
-- **Scale.** Deep structure is drawn 1:1. Ocean depth is exaggerated 5×, and land relief about 12× so mountains read
+- **Scale.** Deep structure is drawn 1:1. Ocean depth is exaggerated 5×, and land relief 7× so mountains read
   across a classroom.
 
 ## Rendering
 
-Almost everything is procedural. The only image assets are two small files for the sea in `public/textures/`; the
-scene falls back to procedural detail if they fail to load.
+The landscape is real: the central Andes north of a cut at 23.4° S, through Láscar volcano. The rest is procedural,
+apart from two small files for the sea in `public/textures/`.
 
 - **Lighting:** linear HDR with ACES filmic tone mapping. A warm sun and sky light the scene, and bloom picks up only
   the brightest light (lava, the sun and its glint). A light vignette and film grain finish each frame.
-- **Terrain:** the mountains use erosion-style noise, so they have sharp ridges, gullies and smooth valley floors.
-  Sun shadows and ambient occlusion are baked from the height field at load. Per-pixel detail normals add texture.
-  Materials blend by height, slope and aspect: beach, forest and grassland, dry slopes, layered rock, scree, ash
-  around the volcanoes, and snow.
+- **Terrain:** real elevation and bathymetry (Terrarium tiles) and real colour (Sentinel-2 cloudless mosaic, dry
+  season 2020), in `public/geo/`: a detailed grid over the margin (1,750 km square) and a coarse one out to the
+  Caribbean. The Atacama coast and trench, Salar de Atacama, the Altiplano-Puna, Titicaca, Uyuni and the Amazon
+  are all where they really are. The satellite shading is removed (de-shaded with the elevation and the satellite's
+  sun angle), so the scene's own sun lights the relief. Normals, sun shadows and ambient occlusion are baked from
+  the elevation in a worker at load, and close-up views add fine detail normals.
+  `scripts/geodata/build.py` rebuilds the assets (Python with rasterio, numpy and pillow).
 - **Sky and sea:** one atmosphere model drives the sky and the haze over distant land and sea, so far mountains
   fade into the sky behind them. Clouds are lit with self-shadowing. The ocean has swell trains, Fresnel reflection,
   a sun glint path, light through the wave crests, and surf and whitecaps.
@@ -128,3 +134,7 @@ src/
 - `public/textures/sky_blouberg_sunrise_2_1k.hdr`: "Blouberg Sunrise 2" by Greg Zaal, [Poly Haven](https://polyhaven.com/a/blouberg_sunrise_2), CC0.
   Used for the clouds seen in ocean reflections, rotated to match the scene's sun.
 - `public/textures/waternormals.jpg`: wave normal map from the [three.js examples](https://github.com/mrdoob/three.js/tree/dev/examples/textures).
+- `public/geo/*_color.webp`: contains modified Copernicus Sentinel data 2020 processed by Sentinel Hub
+  ([Sentinel-2 L2A 120 m mosaic](https://registry.opendata.aws/sentinel-s2-l2a-mosaic-120/)), CC BY 4.0.
+- `public/geo/*_dem.webp`: [Terrarium elevation tiles](https://registry.opendata.aws/terrain-tiles/) (Mapzen; SRTM,
+  GMTED2010, ETOPO1 and other public sources).
