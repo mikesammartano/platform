@@ -3,13 +3,13 @@ import { TEACH_STEPS } from '../content/teach';
 import { useApp } from '../state/store';
 import type { DrawTool, EvidenceKey, FocusKey, LayerKey, Tab, ViewMode } from '../state/types';
 import { EngineCtx } from './context';
-import { Icon, PATHS } from './icons';
+import { Icon, type IconName } from './icons';
 
-const TABS: { id: Tab; label: string; d: string }[] = [
-  { id: 'show', label: 'Show', d: PATHS.show },
-  { id: 'evidence', label: 'Evidence', d: PATHS.evidence },
-  { id: 'draw', label: 'Draw', d: PATHS.draw },
-  { id: 'view', label: 'View', d: PATHS.view },
+const TABS: { id: Tab; label: string; i: IconName }[] = [
+  { id: 'show', label: 'Show', i: 'show' },
+  { id: 'evidence', label: 'Evidence', i: 'evidence' },
+  { id: 'draw', label: 'Draw', i: 'draw' },
+  { id: 'view', label: 'View', i: 'view' },
 ];
 
 export function Panel() {
@@ -37,7 +37,7 @@ export function Panel() {
                 className="tab"
                 onClick={() => setTab(t.id)}
               >
-                <Icon d={t.d} size={34} stroke={tab === t.id ? 'var(--green-ic)' : 'var(--dim)'} />
+                <Icon i={t.i} size={34} stroke={tab === t.id ? 'var(--green-ic)' : 'var(--dim)'} />
                 {t.label}
               </button>
             ))}
@@ -58,7 +58,7 @@ export function Panel() {
 function Indicator() {
   return (
     <span className="ind" aria-hidden="true">
-      <Icon d={PATHS.check} size={18} stroke="#F7F7F5" sw={3.4} />
+      <Icon i="check" size={18} stroke="#F7F7F5" weight="bold" />
     </span>
   );
 }
@@ -101,7 +101,7 @@ function ShowTab() {
       <div>
         <button className="geo-toggle" aria-expanded={geoOpen} aria-controls="geology" onClick={() => setGeo(!geoOpen)}>
           Geology
-          <Icon d={PATHS.chevron} size={30} sw={2.2} />
+          <Icon i="chevron" size={30} />
         </button>
         {geoOpen && (
           <div id="geology" role="group" aria-label="Geology layers">
@@ -192,7 +192,7 @@ function DrawTab() {
         <div className="tool-grid" role="group" aria-labelledby="lbl-tools">
           {DRAW_TOOLS.map(([id, label]) => (
             <button key={id} className="tool" aria-pressed={draw.tool === id} onClick={() => setTool(id)}>
-              <Icon d={PATHS[id]} size={34} />
+              <Icon i={id} size={34} />
               {label}
             </button>
           ))}
@@ -203,7 +203,7 @@ function DrawTab() {
             aria-label={confirming ? 'Tap again to clear all drawings' : 'Clear all drawings'}
             style={{ opacity: hasMarks ? 1 : 0.4 }}
           >
-            <Icon d={PATHS.clear} size={34} />
+            <Icon i="clear" size={34} />
             {confirming ? 'Tap again' : 'Clear'}
           </button>
         </div>
@@ -212,11 +212,11 @@ function DrawTab() {
         <div className="sec-label" id="lbl-hist">History</div>
         <div className="history" role="group" aria-labelledby="lbl-hist">
           <button className="hist" disabled={!canUndo} onClick={undo}>
-            <Icon d={PATHS.undo} size={30} />
+            <Icon i="undo" size={30} />
             Undo
           </button>
           <button className="hist" disabled={!canRedo} onClick={redo}>
-            <Icon d={PATHS.redo} size={30} />
+            <Icon i="redo" size={30} />
             Redo
           </button>
         </div>
@@ -316,16 +316,16 @@ function Footer() {
   return (
     <div className="footer">
       <button className="teach-row" onClick={startTeach}>
-        <Icon d={PATHS.teach} size={40} stroke="#F7F7F5" />
+        <Icon i="teach" size={40} stroke="#F7F7F5" />
         <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span className="t1">Teach</span>
           <span className="t2">Guided sequence</span>
         </span>
-        <Icon d={PATHS.chevron} size={32} stroke="var(--text-2)" sw={2.2} />
+        <Icon i="chevron" size={32} stroke="var(--text-2)" />
       </button>
       <div className="util">
         <button className="l" onClick={reset} aria-label="Reset visualization">
-          <Icon d={PATHS.reset} size={28} />
+          <Icon i="reset" size={28} />
           Reset
         </button>
         <CollapseButton />
@@ -339,7 +339,7 @@ function CollapseButton() {
   return (
     <button className="r" aria-label="Collapse Teacher Tools" onClick={() => setOpen(false)}>
       Collapse
-      <Icon d={PATHS.collapse} size={28} />
+      <Icon i="collapse" size={28} />
     </button>
   );
 }
@@ -386,7 +386,7 @@ function TeachView() {
         </div>
         <div className="util">
           <button className="l" onClick={exit}>
-            <Icon d={PATHS.exitTeach} size={28} />
+            <Icon i="exitTeach" size={28} />
             Exit teaching
           </button>
           <CollapseButton />

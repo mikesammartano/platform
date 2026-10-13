@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react';
 import { DEPTH_STOPS } from '../scene/effects';
 import { useApp } from '../state/store';
 import { EngineCtx } from './context';
-import { Icon, PATHS, PauseGlyph, PlayGlyph } from './icons';
+import { Icon, PauseGlyph, PlayGlyph } from './icons';
 
 export async function enterPresentation() {
   useApp.getState().setPresenting(true);
@@ -26,7 +26,7 @@ function ToolsButton() {
   const setOpen = useApp((s) => s.setPanelOpen);
   return (
     <button className="icon-btn lg" onClick={() => setOpen(true)} aria-label="Open Teacher Tools" title="Teacher Tools">
-      <Icon d={PATHS.tools} size={30} sw={2} />
+      <Icon i="tools" size={30} />
     </button>
   );
 }
@@ -35,7 +35,7 @@ export function ClosedControls() {
   return (
     <div className="top-actions">
       <button className="icon-btn lg" onClick={enterPresentation} aria-label="Present full screen" title="Present">
-        <Icon d={PATHS.presentScreen} size={30} sw={2} />
+        <Icon i="presentScreen" size={30} />
       </button>
       <ToolsButton />
     </div>
@@ -48,7 +48,7 @@ export function PresentControls() {
     <div className="top-actions">
       <ToolsButton />
       <button className="icon-btn lg" onClick={exitPresentation} aria-label="Exit presentation" title="Exit presentation">
-        <Icon d={PATHS.exitPresent} size={30} sw={2} />
+        <Icon i="exitPresent" size={30} />
       </button>
     </div>
   );
